@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -24,9 +25,8 @@ func isRTL(r rune) bool {
 }
 
 // emojiBase is a pictographic symbol a presentation selector or ZWJ may follow (not ASCII ^ ` or digits).
-// shortcut: approximates Extended_Pictographic by category and range; use the real table if false alarms show up.
 func emojiBase(r rune) bool {
-	return r == 0xA9 || r == 0xAE || r >= 0x2000 && unicode.In(r, unicode.So, unicode.Sk)
+	return unicode.Is(extPict, r) || r >= 0x1F3FB && r <= 0x1F3FF // skin-tone modifiers
 }
 
 func keycapBase(r rune) bool { return r >= '0' && r <= '9' || r == '#' || r == '*' }
@@ -35,7 +35,7 @@ func keycapBase(r rune) bool { return r >= '0' && r <= '9' || r == '#' || r == '
 func isVS(r rune) bool { return r >= 0xFE00 && r <= 0xFE0F || r >= 0xE0100 && r <= 0xE01EF }
 
 // legit reports whether an otherwise-suspicious rune is part of ordinary text: emoji presentation
-// selectors, keycaps and ZWJ sequences, and up to 3 combining marks on a letter (NFD Vietnamese, Indic).
+// selectors, keycaps and ZWJ sequences, and up to 3 combining marks on a letter of the same script (NFD Vietnamese, Indic).
 func legit(rs []rune, i, marks int, base rune) bool {
 	r := rs[i]
 	if invisible[r] {
@@ -57,8 +57,45 @@ func legit(rs []rune, i, marks int, base rune) bool {
 		return prev == 0xFE0F || keycapBase(prev)
 	case r == 0x200D:
 		return (emojiBase(prev) || prev == 0xFE0F) && emojiBase(next)
+	case r >= 0xE0020 && r <= 0xE007F:
+		return tagSeq(rs, i)
 	case unicode.Is(unicode.Mn, r):
-		return unicode.IsLetter(base) && marks <= 3
+		return unicode.IsLetter(base) && marks <= 3 && (unicode.Is(unicode.Inherited, r) || sameScript(base, r))
+	}
+	return false
+}
+
+// subdivID is a UTS #35 subdivision id: a 2-letter region or 3-digit code plus a 1-4 char suffix.
+var subdivID = regexp.MustCompile(`^([a-z]{2}|[0-9]{3})[a-z0-9]{1,4}$`)
+
+// tagSeq reports whether the tag rune rs[i] lies in a well-formed UTS #51 emoji tag sequence: U+1F3F4,
+// a lowercase subdivision id in tag letters, then exactly one cancel tag U+E007F ending the run.
+// Anywhere else tag characters are an ASCII-smuggling channel.
+func tagSeq(rs []rune, i int) bool {
+	// A valid run is at most 8 tags (7-char id + cancel); scanning no further keeps long runs linear.
+	s, e := i, i
+	for s > 0 && rs[s-1] >= 0xE0020 && rs[s-1] <= 0xE007F && i-s < 8 {
+		s--
+	}
+	for e+1 < len(rs) && rs[e+1] >= 0xE0020 && rs[e+1] <= 0xE007F && e-i < 8 {
+		e++
+	}
+	if e-s+1 > 8 || s == 0 || rs[s-1] != 0x1F3F4 || rs[e] != 0xE007F {
+		return false
+	}
+	id := make([]byte, 0, e-s)
+	for _, r := range rs[s:e] {
+		id = append(id, byte(r-0xE0000))
+	}
+	return subdivID.Match(id)
+}
+
+// sameScript reports whether a and b belong to the same Unicode script.
+func sameScript(a, b rune) bool {
+	for _, t := range unicode.Scripts {
+		if unicode.Is(t, a) {
+			return unicode.Is(t, b)
+		}
 	}
 	return false
 }
