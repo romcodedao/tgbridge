@@ -18,6 +18,7 @@ import (
 	"github.com/romcodedao/tgbridge/internal/render"
 	"github.com/romcodedao/tgbridge/internal/store"
 	"github.com/romcodedao/tgbridge/internal/telegram"
+	"github.com/romcodedao/tgbridge/internal/uploads"
 )
 
 type Orca interface {
@@ -42,6 +43,7 @@ type Deps struct {
 	Poll        time.Duration
 	BotUser     string
 	StopSettle  time.Duration // wait after the Stop hook for Claude to flush the final transcript lines
+	UploadsDir  string        // the topic's Telegram uploads are deleted when its handoff ends
 }
 
 type live struct {
@@ -200,6 +202,12 @@ func (m *Manager) Off(ctx context.Context, thread int, closeTerminal bool) error
 	tp, ok := m.d.Store.UpdateTopic(thread, func(t *store.Topic) { t.Closed = true })
 	if !ok {
 		return errors.New("no such handoff")
+	}
+	if m.d.UploadsDir != "" {
+		// shortcut: not serialized with the bot's saves; a save racing an ending handoff just fails
+		if err := uploads.Remove(m.d.UploadsDir, thread); err != nil {
+			log.Printf("uploads remove: %v", err)
+		}
 	}
 	msg := "✅ Handoff stopped. The session keeps running in Orca."
 	if closeTerminal && tp.TerminalHandle != "" {

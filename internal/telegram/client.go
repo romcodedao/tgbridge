@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -20,6 +22,7 @@ func (e *APIError) Error() string { return fmt.Sprintf("telegram %d: %s", e.Code
 
 type Client struct {
 	base  string
+	file  string // file download base, carries the token
 	http  *http.Client
 	sleep func(time.Duration) // tests only; nil means a context-aware wait
 }
@@ -28,7 +31,7 @@ func New(token, baseURL string) *Client {
 	if baseURL == "" {
 		baseURL = "https://api.telegram.org"
 	}
-	return &Client{base: baseURL + "/bot" + token + "/", http: &http.Client{Timeout: 90 * time.Second}}
+	return &Client{base: baseURL + "/bot" + token + "/", file: baseURL + "/file/bot" + token + "/", http: &http.Client{Timeout: 90 * time.Second}}
 }
 
 type envelope struct {
@@ -201,4 +204,44 @@ func (c *Client) SetMessageReaction(ctx context.Context, chatID int64, msgID int
 
 func (c *Client) LeaveChat(ctx context.Context, chatID int64) error {
 	return c.Call(ctx, "leaveChat", map[string]any{"chat_id": chatID}, nil)
+}
+
+// MaxDownload is the Bot API's getFile size limit.
+const MaxDownload = 20 << 20
+
+var ErrTooBig = errors.New("file is larger than 20 MB")
+
+// Download fetches a file by id into w, refusing anything over MaxDownload.
+func (c *Client) Download(ctx context.Context, fileID string, w io.Writer) error {
+	var f struct {
+		FileSize int64  `json:"file_size"`
+		FilePath string `json:"file_path"`
+	}
+	if err := c.Call(ctx, "getFile", map[string]any{"file_id": fileID}, &f); err != nil {
+		return err
+	}
+	if f.FileSize > MaxDownload {
+		return ErrTooBig
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", c.file+f.FilePath, nil)
+	if err != nil {
+		return errors.New("telegram download: request failed")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		// never include the URL: it carries the token
+		return errors.New("telegram download: request failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("telegram download: status %d", resp.StatusCode)
+	}
+	n, err := io.Copy(w, io.LimitReader(resp.Body, MaxDownload+1))
+	if err != nil {
+		return errors.New("telegram download: read failed")
+	}
+	if n > MaxDownload {
+		return ErrTooBig
+	}
+	return nil
 }

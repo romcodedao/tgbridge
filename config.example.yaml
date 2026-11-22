@@ -19,3 +19,8 @@ context:
 draft_interval: 700ms       # streaming draft refresh
 handoff_permission_timeout: 10m   # then the prompt falls back to the Orca terminal
 rate_limit_per_min: 30
+
+uploads:                  # photos and files you send (Claude reads them from here)
+  dir: ~/.cache/tgbridge/uploads
+  max_age: 168h           # delete uploads older than this (7 days)
+  max_total_mb: 500       # then delete the oldest until the total fits

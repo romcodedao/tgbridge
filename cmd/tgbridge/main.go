@@ -155,7 +155,7 @@ func serve() error {
 	b := bot.New(bot.Deps{Cfg: cfg, TG: tg, Mgr: mgr, Store: st, Audit: store.Audit(cfg.StateDir), Orca: oc, BotUsername: me.Username, SelfBin: self()})
 	home, _ := os.UserHomeDir()
 	h := handoff.New(handoff.Deps{TG: tg, Store: st, Orca: oc, Ask: b.Ask, Owner: cfg.OwnerID, ClaudeHome: filepath.Join(home, ".claude"),
-		PermTimeout: cfg.HandoffPermissionTimeout, BotUser: me.Username})
+		PermTimeout: cfg.HandoffPermissionTimeout, BotUser: me.Username, UploadsDir: cfg.Uploads.Dir})
 	b.SetHandoff(h)
 
 	go func() {

@@ -8,6 +8,14 @@
 - Each reply streams live: a thinking block, a checklist of tool calls, and the answer, with a ⏹ stop button. The final message keeps the thinking and tool calls collapsed. Its footer shows `ctx 64k · 2m14s · $0.12` (context size, time, cost).
 - Pasting or forwarding an alert works: forwarded text is passed to Claude as data, not instructions.
 
+## Photos and files
+
+- Send a photo or a file (with or without a caption) in General or a topic. The bot saves it and tells Claude its path, so Claude can read it. The caption is the message.
+- Up to **20 MB** (the Telegram bot limit). Voice, video, audio and stickers aren't supported.
+- An album sent in General goes into one topic.
+- Files named like `*.pem`, `*.key` or `.env*` are saved, but Claude's secret-file rules stop it reading them.
+- Saved files are deleted after 7 days, when they pass 500 MB in total (oldest first), and on `/close` or `/reset` in their topic. See `uploads.*` in [configuration](configuration.md).
+
 ## Commands
 
 | Command | Does |

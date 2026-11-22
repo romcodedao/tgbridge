@@ -62,9 +62,9 @@ In Telegram: `/help` lists the commands. `/mode ask|auto|full` sets how much Cla
 
 ## Docs
 
-- [Using the bot](docs/usage.md): topics, commands, permission modes, handoff, context limits
+- [Using the bot](docs/usage.md): topics, photos and files, commands, permission modes, handoff, context limits
 - [Operations](docs/operations.md): every `tgb` command, the raw commands behind it, files, troubleshooting
-- [Configuration](docs/configuration.md): every setting in `config.yaml`
+- [Configuration](docs/configuration.md): every setting in `config.yaml`, including where sent photos and files are kept (`uploads.*`)
 - [Moving to another machine](docs/migration.md)
 - [Security](docs/security.md)
 - [Development](docs/development.md): tests and code layout

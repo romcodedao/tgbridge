@@ -94,3 +94,28 @@ func TestPermissionModeDefaultAndValidation(t *testing.T) {
 		t.Fatalf("want permission_mode error, got %v", err)
 	}
 }
+
+func TestUploadsDefaultsAndOverride(t *testing.T) {
+	c, err := Load(write(t, "owner_id: 1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Uploads.Dir != filepath.Join(home(), ".cache", "tgbridge", "uploads") || c.Uploads.MaxAge != 168*time.Hour || c.Uploads.MaxTotalMB != 500 {
+		t.Fatalf("defaults: %+v", c.Uploads)
+	}
+	c, err = Load(write(t, "owner_id: 1\nuploads:\n  dir: ~/up\n  max_age: 1h\n  max_total_mb: 10\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Uploads.Dir != filepath.Join(home(), "up") || c.Uploads.MaxAge != time.Hour || c.Uploads.MaxTotalMB != 10 {
+		t.Fatalf("override: %+v", c.Uploads)
+	}
+}
+
+func TestUploadsLimitsMustBePositive(t *testing.T) {
+	for _, y := range []string{"uploads:\n  max_age: 0s\n", "uploads:\n  max_total_mb: -1\n"} {
+		if _, err := Load(write(t, "owner_id: 1\n"+y)); err == nil || !strings.Contains(err.Error(), "uploads") {
+			t.Fatalf("%q: want uploads error, got %v", y, err)
+		}
+	}
+}

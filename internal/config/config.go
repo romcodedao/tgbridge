@@ -25,6 +25,12 @@ type Context struct {
 	HardLimit int `yaml:"hard_limit"`
 }
 
+type Uploads struct {
+	Dir        string        `yaml:"dir"`
+	MaxAge     time.Duration `yaml:"max_age"`
+	MaxTotalMB int64         `yaml:"max_total_mb"`
+}
+
 type Config struct {
 	TokenFile                string        `yaml:"token_file"`
 	OwnerID                  int64         `yaml:"owner_id"`
@@ -39,6 +45,7 @@ type Config struct {
 	RateLimitPerMin          int           `yaml:"rate_limit_per_min"`
 	StateDir                 string        `yaml:"state_dir"`
 	SocketPath               string        `yaml:"socket_path"`
+	Uploads                  Uploads       `yaml:"uploads"`
 }
 
 // PermissionModes maps tgbridge's mode names to claude --permission-mode values ("" = Claude's default:
@@ -71,6 +78,7 @@ func Defaults() *Config {
 		RateLimitPerMin:          30,
 		StateDir:                 filepath.Join(home(), ".local", "state", "tgbridge"),
 		SocketPath:               DefaultSocket(),
+		Uploads:                  Uploads{Dir: filepath.Join(home(), ".cache", "tgbridge", "uploads"), MaxAge: 168 * time.Hour, MaxTotalMB: 500},
 	}
 }
 
@@ -84,11 +92,14 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	for _, p := range []*string{&c.TokenFile, &c.DefaultCwd, &c.StateDir, &c.SocketPath, &c.OrcaCLI, &c.ClaudeBin} {
+	for _, p := range []*string{&c.TokenFile, &c.DefaultCwd, &c.StateDir, &c.SocketPath, &c.OrcaCLI, &c.ClaudeBin, &c.Uploads.Dir} {
 		*p = expand(*p)
 	}
 	if _, ok := PermissionModes[c.Engine.PermissionMode]; !ok {
 		return nil, fmt.Errorf("config: engine.permission_mode must be ask, auto or full (got %q)", c.Engine.PermissionMode)
+	}
+	if c.Uploads.MaxAge <= 0 || c.Uploads.MaxTotalMB <= 0 {
+		return nil, fmt.Errorf("config: uploads.max_age and uploads.max_total_mb must be positive (got %v, %d)", c.Uploads.MaxAge, c.Uploads.MaxTotalMB)
 	}
 	if c.OwnerID == 0 {
 		return nil, errors.New("config: owner_id is required (send /whoami to the bot to find it)")

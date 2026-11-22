@@ -46,7 +46,7 @@ func (b *Bot) command(ctx context.Context, m *telegram.Message, cmd, arg string)
 			b.reply(ctx, b.chat(), thread, "Usage: /new [path] <task>")
 			return true
 		}
-		b.newSession(ctx, cwd, titleFrom(task), task)
+		b.newSession(ctx, cwd, titleFrom(task), task, nil)
 	case "/sessions":
 		b.sessions(ctx, thread)
 	case "/status":
@@ -73,6 +73,7 @@ func (b *Bot) command(ctx context.Context, m *telegram.Message, cmd, arg string)
 		}
 		b.mgr.Close(key(thread))
 		b.clearGrants(thread)
+		b.removeUploads(thread)
 		b.st.UpdateTopic(thread, func(t *store.Topic) {
 			t.ClaudeSessionID, t.ContextTokens, t.SoftWarned, t.CarryOver = "", 0, false, ""
 		})
@@ -166,6 +167,7 @@ func (b *Bot) closeThread(ctx context.Context, thread int) {
 	}
 	b.mgr.Close(key(thread))
 	b.clearGrants(thread)
+	b.removeUploads(thread)
 	b.st.UpdateTopic(thread, func(t *store.Topic) { t.Closed = true })
 	b.reply(ctx, b.chat(), thread, "✅ Session closed.")
 	b.tg.MarkTopicClosed(ctx, b.chat(), thread, tp.Title)

@@ -30,7 +30,29 @@ type Message struct {
 	Caption           string             `json:"caption,omitempty"`
 	ReplyToMessage    *Message           `json:"reply_to_message,omitempty"`
 	ForwardOrigin     map[string]any     `json:"forward_origin,omitempty"`
+	MediaGroupID      string             `json:"media_group_id,omitempty"`
 	ForumTopicCreated *ForumTopicCreated `json:"forum_topic_created,omitempty"`
+	Photo             []PhotoSize        `json:"photo,omitempty"`
+	Document          *Document          `json:"document,omitempty"`
+	// presence-only: unsupported media kinds
+	Voice     *struct{} `json:"voice,omitempty"`
+	Video     *struct{} `json:"video,omitempty"`
+	Audio     *struct{} `json:"audio,omitempty"`
+	Sticker   *struct{} `json:"sticker,omitempty"`
+	VideoNote *struct{} `json:"video_note,omitempty"`
+}
+
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	FileSize int64  `json:"file_size"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+}
+
+type Document struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	FileSize int64  `json:"file_size"`
 }
 
 type CallbackQuery struct {

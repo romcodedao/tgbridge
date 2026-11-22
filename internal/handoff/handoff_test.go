@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -115,7 +116,7 @@ func setup(t *testing.T, stateDir string) *env {
 	st, _ := store.Open(stateDir)
 	f := &fakeTG{}
 	e := &env{tg: f, or: &fakeOrca{idle: true}, st: st, home: home, ask: make(chan string, 1), trans: trans}
-	e.m = New(Deps{TG: f.serve(t), Store: st, Orca: e.or, Owner: 1, ClaudeHome: home, PermTimeout: 200 * time.Millisecond, Poll: 20 * time.Millisecond, StopSettle: 150 * time.Millisecond,
+	e.m = New(Deps{TG: f.serve(t), Store: st, UploadsDir: filepath.Join(stateDir, "uploads"), Orca: e.or, Owner: 1, ClaudeHome: home, PermTimeout: 200 * time.Millisecond, Poll: 20 * time.Millisecond, StopSettle: 150 * time.Millisecond,
 		Ask: func(ctx context.Context, thread int, title, detail string, timeout time.Duration) string {
 			if strings.Contains(detail, strings.Repeat("x", 4000)) {
 				e.ask <- "asked-long"
@@ -393,5 +394,17 @@ func TestOverlongHandoffPermissionGoesToTerminal(t *testing.T) {
 	}
 	if !strings.Contains(e.tg.all(), "too long") {
 		t.Fatal("owner not told why")
+	}
+}
+
+func TestOffRemovesUploads(t *testing.T) {
+	e := setup(t, "")
+	thread := handoffOn(t, e)
+	dir := filepath.Join(e.m.d.UploadsDir, strconv.Itoa(thread))
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(filepath.Join(dir, "1-photo.jpg"), []byte("x"), 0o600)
+	e.m.Handle(bg, ipc.Request{Op: "handoff", SessionID: sid, Args: json.RawMessage(`{"state":"off"}`)})
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("uploads left after handoff off")
 	}
 }

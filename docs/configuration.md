@@ -26,6 +26,9 @@
 | `rate_limit_per_min` | `30` | Messages per minute before the bot asks you to slow down |
 | `state_dir` | `~/.local/state/tgbridge` | Topics, approvals, audit log |
 | `socket_path` | `$XDG_RUNTIME_DIR/tgbridge.sock` | Local socket for the MCP server and hooks |
+| `uploads.dir` | `~/.cache/tgbridge/uploads` | Where photos and files you send are saved, one folder per topic. Keep it outside `state_dir`: Claude is denied reading `state_dir`, so it couldn't open them there. |
+| `uploads.max_age` | `168h` | Saved files older than this are deleted (checked at start and hourly) |
+| `uploads.max_total_mb` | `500` | When saved files exceed this, the oldest are deleted first |
 
 **Example:**
 

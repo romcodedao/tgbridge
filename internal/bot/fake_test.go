@@ -36,6 +36,13 @@ type fakeTG struct {
 }
 
 func (f *fakeTG) handler(w http.ResponseWriter, r *http.Request) {
+	if strings.Contains(r.URL.Path, "/file/") {
+		f.mu.Lock()
+		f.calls = append(f.calls, tgCall{"file", nil})
+		f.mu.Unlock()
+		io.WriteString(w, "PNGDATA")
+		return
+	}
 	method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 	b, _ := io.ReadAll(r.Body)
 	var body map[string]any
@@ -56,6 +63,8 @@ func (f *fakeTG) handler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"ok":true,"result":{"message_thread_id":%d,"name":"x"}}`, th)
 	case "sendMessage", "sendRichMessage":
 		fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d,"chat":{"id":%d,"type":"private"}}}`, id, owner)
+	case "getFile":
+		io.WriteString(w, `{"ok":true,"result":{"file_id":"F","file_size":7,"file_path":"docs/f.bin"}}`)
 	case "getMe":
 		io.WriteString(w, `{"ok":true,"result":{"id":1,"is_bot":true,"username":"testbot","has_topics_enabled":true}}`)
 	default:
@@ -116,6 +125,7 @@ func newHarness(t *testing.T, mut func(*config.Config)) *harness {
 	cfg.StateDir = t.TempDir()
 	cfg.DefaultCwd = t.TempDir()
 	cfg.DraftInterval = 20 * time.Millisecond
+	cfg.Uploads.Dir = t.TempDir()
 	fake, _ := filepath.Abs("../engine/testdata/fakeclaude.sh")
 	cfg.ClaudeBin = fake
 	if mut != nil {
@@ -134,6 +144,13 @@ func newHarness(t *testing.T, mut func(*config.Config)) *harness {
 func msg(thread int, from int64, text string) telegram.Update {
 	return telegram.Update{UpdateID: 1, Message: &telegram.Message{MessageID: 1, MessageThreadID: thread, IsTopicMessage: thread != 0,
 		From: &telegram.User{ID: from}, Chat: telegram.Chat{ID: from, Type: "private"}, Text: text}}
+}
+
+func photoMsg(thread int, caption string) telegram.Update {
+	u := msg(thread, owner, "")
+	u.Message.Caption = caption
+	u.Message.Photo = []telegram.PhotoSize{{FileID: "S", FileSize: 10}, {FileID: "F", FileSize: 7}}
+	return u
 }
 
 func eventually(t *testing.T, cond func() bool) {

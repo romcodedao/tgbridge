@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -149,5 +150,67 @@ func TestClient429HonoursContext(t *testing.T) {
 	c.Call(ctx, "sendMessage", map[string]any{}, nil)
 	if time.Since(start) > 2*time.Second {
 		t.Fatal("429 sleep ignored the context")
+	}
+}
+
+func downloadClient(t *testing.T, fileSize string, file http.HandlerFunc) (*Client, *int) {
+	fileHits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/file/") {
+			fileHits++
+			file(w, r)
+			return
+		}
+		io.WriteString(w, `{"ok":true,"result":{"file_id":"F",`+fileSize+`"file_path":"photos/a.jpg"}}`)
+	}))
+	t.Cleanup(srv.Close)
+	return New("T", srv.URL), &fileHits
+}
+
+func TestDownload(t *testing.T) {
+	c, _ := downloadClient(t, `"file_size":5,`, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/file/botT/photos/a.jpg" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		io.WriteString(w, "hello")
+	})
+	var buf strings.Builder
+	if err := c.Download(context.Background(), "F", &buf); err != nil || buf.String() != "hello" {
+		t.Fatalf("%q %v", buf.String(), err)
+	}
+}
+
+func TestDownloadTooBigBySize(t *testing.T) {
+	c, hits := downloadClient(t, `"file_size":`+strconv.Itoa(MaxDownload+1)+`,`, func(http.ResponseWriter, *http.Request) {})
+	if err := c.Download(context.Background(), "F", io.Discard); !errors.Is(err, ErrTooBig) || *hits != 0 {
+		t.Fatalf("%v hits=%d", err, *hits)
+	}
+}
+
+func TestDownloadTooBigByStream(t *testing.T) {
+	c, _ := downloadClient(t, ``, func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, MaxDownload+1))
+	})
+	if err := c.Download(context.Background(), "F", io.Discard); !errors.Is(err, ErrTooBig) {
+		t.Fatal(err)
+	}
+}
+
+func TestDownloadErrorHidesToken(t *testing.T) {
+	c, _ := downloadClient(t, ``, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
+	err := c.Download(context.Background(), "F", io.Discard)
+	if err == nil || strings.Contains(err.Error(), "botT") {
+		t.Fatal(err)
+	}
+}
+
+func TestDownloadTransportErrorHidesToken(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL + "/botT/secret"
+	dead.Close()
+	c, _ := downloadClient(t, ``, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, deadURL, http.StatusFound) })
+	err := c.Download(context.Background(), "F", io.Discard)
+	if err == nil || strings.Contains(err.Error(), "botT") {
+		t.Fatal(err)
 	}
 }
