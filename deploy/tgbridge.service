@@ -1,0 +1,13 @@
+[Unit]
+Description=tgbridge - Claude Code over Telegram
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/tgbridge serve
+Restart=on-failure
+RestartSec=5
+# claude and orca must be on PATH
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

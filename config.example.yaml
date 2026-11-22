@@ -1,0 +1,21 @@
+# ~/.config/tgbridge/config.yaml
+owner_id: 0                 # your Telegram user ID (send /whoami to the bot)
+token_file: ~/.config/tgbridge/token   # chmod 600; or set TGBRIDGE_TOKEN
+default_cwd: ~/              # folder new sessions start in
+# model: sonnet             # claude --model for Telegram sessions (default: your Claude Code default)
+# orca_cli: ~/.config/orca/cli/bin/orca
+
+engine:
+  idle_timeout: 15m         # close an idle Claude process; the next message resumes it
+  max_live: 3               # Claude processes at once (conversations are unlimited)
+  max_age: 24h              # a topic quiet longer than this starts fresh with a summary
+  permission_timeout: 10m   # unanswered permission prompt is denied
+  permission_mode: ask      # ask | auto | full (default for new topics; change one topic with /mode)
+
+context:
+  soft_limit: 80000         # warn with [Compact] [Start fresh] buttons
+  hard_limit: 150000        # automatic fresh start with a summary
+
+draft_interval: 700ms       # streaming draft refresh
+handoff_permission_timeout: 10m   # then the prompt falls back to the Orca terminal
+rate_limit_per_min: 30
