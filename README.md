@@ -17,7 +17,7 @@ You need: Linux with systemd, Go 1.27+, `make`, Claude Code installed and logged
 2. **Get the code and save the token (machine).**
 
    ```bash
-   git clone https://github.com/romcodedao/tgbridge ~/src/tgbridge && cd ~/src/tgbridge
+   git clone https://github.com/romcodedao/tgbridge ~/projects/tgbridge && cd ~/projects/tgbridge
    mkdir -p ~/.config/tgbridge && read -rsp "token: " T && printf '%s' "$T" > ~/.config/tgbridge/token && chmod 600 ~/.config/tgbridge/token && unset T && echo saved
    ```
 
@@ -35,7 +35,7 @@ You need: Linux with systemd, Go 1.27+, `make`, Claude Code installed and logged
 4. **Add the shortcut (machine), so every command below works from any folder.**
 
    ```bash
-   echo "alias tgb='make -s -C ~/src/tgbridge'" >> ~/.bashrc && source ~/.bashrc && tgb doctor
+   echo "alias tgb='make -s -C ~/projects/tgbridge'" >> ~/.bashrc && source ~/.bashrc && tgb doctor
    ```
 
    Expected: `ok` lines. `info  handoff hooks not installed` is fine until step 5.

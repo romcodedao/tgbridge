@@ -32,11 +32,11 @@ Copy the archive(s) to the new machine, for example: `scp ~/tgbridge-backup-*.tg
 ## 3. On the new machine: install
 
 ```bash
-git clone https://github.com/romcodedao/tgbridge ~/src/tgbridge
+git clone https://github.com/romcodedao/tgbridge ~/projects/tgbridge
 cd ~ && tar xzf ~/tgbridge-backup-*.tgz            # restores ~/.config/tgbridge and ~/.local/state/tgbridge
 # optional: cd ~ && tar xzf ~/claude-projects.tgz
-cd ~/src/tgbridge && make setup
-echo "alias tgb='make -s -C ~/src/tgbridge'" >> ~/.bashrc && source ~/.bashrc
+cd ~/projects/tgbridge && make setup
+echo "alias tgb='make -s -C ~/projects/tgbridge'" >> ~/.bashrc && source ~/.bashrc
 tgb doctor
 ```
 

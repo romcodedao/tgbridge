@@ -1,5 +1,5 @@
 # tgbridge operations. Run from anywhere with:  make -s -C <repo> <target>
-# Suggested alias (see docs/operations.md):     alias tgb='make -s -C ~/src/tgbridge'
+# Suggested alias (see docs/operations.md):     alias tgb='make -s -C ~/projects/tgbridge'
 
 SHELL   := /bin/bash
 BIN     ?= $(HOME)/.local/bin/tgbridge

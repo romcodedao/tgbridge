@@ -9,10 +9,12 @@
 All day-to-day commands are `make` targets in the repo's [`Makefile`](../Makefile). The alias runs them from any folder:
 
 ```bash
-alias tgb='make -s -C ~/src/tgbridge'     # in ~/.bashrc; adjust the path to where the repo lives
+alias tgb='make -s -C ~/projects/tgbridge'     # in ~/.bashrc; adjust the path to where the repo lives
 ```
 
-Without the alias, use `make -s -C ~/src/tgbridge <target>`, or `make <target>` inside the repo.
+Without the alias, use `make -s -C ~/projects/tgbridge <target>`, or `make <target>` inside the repo.
+
+**Moving an existing install to this checkout** (for example, one built from an Orca worktree): clone to `~/projects/tgbridge`, point the alias there, then run `tgb deploy`. It rebuilds `~/.local/bin/tgbridge` from the checkout and restarts the service; config, token and state stay where they are.
 
 | Command | What it does | Raw equivalent |
 |---|---|---|
