@@ -5,7 +5,7 @@ The short path is in the [README](../README.md#install). This page has the optio
 ## The installer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh | sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh | sh
 ```
 
 It finds the latest release, downloads the archive for your OS and architecture, checks its sha256 against `checksums.txt`, installs `tgbridge` and runs `tgbridge init`.
@@ -15,12 +15,12 @@ It finds the latest release, downloads the archive for your OS and architecture,
 | `TGBRIDGE_VERSION` | latest release | Release tag to install, for example `v0.1.0` |
 | `TGBRIDGE_INSTALL_DIR` | `~/.local/bin` | Where the binary goes |
 | `TGBRIDGE_NO_INIT=1` | off | Install only; skip the wizard |
-| `TGBRIDGE_BASE_URL` | `https://github.com/romcodedao/tgbridge/releases` | Releases URL |
+| `TGBRIDGE_BASE_URL` | `https://github.com/romcodedao/tgbridge/releases` | Releases URL; must be `https://` |
 
 Set them on `sh`, not on `curl`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh | TGBRIDGE_VERSION=v0.1.0 TGBRIDGE_NO_INIT=1 sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh | TGBRIDGE_VERSION=v0.1.0 TGBRIDGE_NO_INIT=1 sh
 ```
 
 `install.sh --help` prints the same list. If the terminal can't be opened (a script, CI), the installer stops after installing and prints `run: tgbridge init`. If the install folder isn't on your PATH, it prints the `export PATH=…` line to add.
@@ -32,11 +32,11 @@ curl -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh
 | Claude Code | Finds `claude` and checks you're logged in. A problem is reported, not fatal. |
 | Config | Creates `~/.config/tgbridge/config.yaml` (its folder is mode 700) from the example, if missing. |
 | Token | Checks the saved token with Telegram. If it's missing or rejected, asks for one (hidden input, three tries) and saves it mode 600. A working `TGBRIDGE_TOKEN` is saved to the token file when that file is missing, because the service doesn't see your shell's environment. |
-| Owner | If `owner_id` is `0`, waits for a private message to the bot, shows the sender and asks `Is this you? [Y/n]`. A running service is stopped first, because it would hold the bot's updates (`409 Conflict`). |
+| Owner | If `owner_id` is `0`, waits for a private message to the bot, shows the sender and asks `Is this you? [y/N]`: only `y` saves it, and Enter or `n` waits for the next message. A running service is stopped first, because it would hold the bot's updates (`409 Conflict`). |
 | Service | Installs and starts the systemd user unit or launchd agent. A custom `TGBRIDGE_CONFIG` is written into it. If the existing file was edited by hand, it's copied to `<file>.bak` first. `--no-service` skips this, and so does a binary in the temp folder (`go run`). |
 | Summary | Runs `tgbridge doctor`. |
 
-Run `tgbridge init` again at any time: finished steps ask nothing and change nothing, except that the service file is rewritten with the current binary path and the service is restarted. The restart ends any Claude turn that is running, so re-run it when the bot is idle.
+Run `tgbridge init` again at any time: finished steps ask nothing and change nothing. Re-running init restarts the service only if its unit changed (for example, the binary moved) or the service isn't running; a restart ends any Claude turn that is running. `tgbridge service install` always restarts it, to apply a config change.
 
 ## Release tarball by hand
 
@@ -45,8 +45,8 @@ Pick your file on the [releases page](https://github.com/romcodedao/tgbridge/rel
 ```bash
 cd "$(mktemp -d)"
 V=X.Y.Z; F=tgbridge_${V}_linux_amd64.tar.gz
-curl -fsSLO https://github.com/romcodedao/tgbridge/releases/download/v$V/$F
-curl -fsSLO https://github.com/romcodedao/tgbridge/releases/download/v$V/checksums.txt
+curl --proto '=https' --tlsv1.2 -fsSLO https://github.com/romcodedao/tgbridge/releases/download/v$V/$F
+curl --proto '=https' --tlsv1.2 -fsSLO https://github.com/romcodedao/tgbridge/releases/download/v$V/checksums.txt
 grep " $F\$" checksums.txt | sha256sum -c -
 ```
 

@@ -35,7 +35,7 @@ In [@BotFather](https://t.me/BotFather) send `/newbot` and copy the token. Then 
 ### 2. Run the installer (machine)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh | sh
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh | sh
 ```
 
 It downloads the release for your machine, checks its sha256, puts `tgbridge` in `~/.local/bin`, then starts `tgbridge init`. The wizard asks for your bot token (hidden), waits for your first message to the bot to learn your user ID, and installs and starts the service. Expected:
@@ -50,8 +50,8 @@ Bot token:
 Saved the token to /home/you/.config/tgbridge/token
 Bot: @yourbot
 Send any message to @yourbot now, in a private chat (Ctrl+C to cancel)...
-Message from Dat (@dat), user ID 123456789. This account will control Claude on this machine.
-Is this you? [Y/n]
+Message from Alex (@alex), user ID 123456789. This account will control Claude on this machine.
+Is this you? [y/N] y
 Saved owner_id: 123456789
 Installed the systemd service: /home/you/.config/systemd/user/tgbridge.service
 
@@ -60,16 +60,16 @@ Summary:
 Done. Send @yourbot a message: a new topic starts your first session.
 ```
 
-Check the name before you answer `Y`: that account will control Claude on this machine. Send the bot a message on your phone: a new topic opens with your Claude session.
+Check the name before you answer `y` (Enter alone means no, and init waits for the next message): that account will control Claude on this machine. Send the bot a message on your phone: a new topic opens with your Claude session.
 
 To keep it running after you log out on Linux: `sudo loginctl enable-linger $USER` (`tgbridge doctor` tells you if it's off).
 
-`init` is safe to re-run. It skips what is already done and fixes what is broken.
+`init` is safe to re-run. It skips what is already done and fixes what is broken; it restarts the service only if its unit changed (or the service isn't running).
 
 **Read it first.** To read the script before it runs:
 
 ```bash
-curl -fsSL -o install.sh https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh
+curl --proto '=https' --tlsv1.2 -fsSL -o install.sh https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh
 less install.sh
 sh install.sh
 ```
