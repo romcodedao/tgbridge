@@ -100,11 +100,15 @@ func Install(settingsPath, bin string, run func(args ...string) error) error {
 	return run("mcp", "add", "--scope", "user", "tgbridge", "--", bin, "mcp")
 }
 
-// Uninstall removes only tgbridge's hooks and MCP server.
+// Uninstall removes only tgbridge's hooks and MCP server; a missing settings file stays missing.
 func Uninstall(settingsPath string, run func(args ...string) error) error {
-	m, _, err := load(settingsPath)
+	m, orig, err := load(settingsPath)
 	if err != nil {
 		return err
+	}
+	if orig == nil {
+		run("mcp", "remove", "--scope", "user", "tgbridge")
+		return nil
 	}
 	if hooks, ok := m["hooks"].(map[string]any); ok {
 		strip(hooks)

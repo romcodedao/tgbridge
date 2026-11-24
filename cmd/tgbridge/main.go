@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"log"
@@ -46,7 +47,9 @@ func usage() {
   serve               run the bridge (config: $TGBRIDGE_CONFIG or ~/.config/tgbridge/config.yaml)
   whoami              wait for a message to the bot and print the sender's user ID (for owner_id)
   install             same as hooks install
-  uninstall           remove the hooks and the MCP server
+  uninstall [--purge] [--yes] [--dry-run]
+                      remove the service, hooks and MCP server; --purge also deletes config,
+                      token, state, logs, uploads and ~/.local/bin/tgbridge (--yes: no prompt)
   mcp                 stdio MCP server (started by Claude)
   hook <event>        Claude Code hook command
   version`)
@@ -166,7 +169,7 @@ func main() {
 	case "install":
 		hooksInstall()
 	case "uninstall":
-		hooksUninstall()
+		os.Exit(uninstall(os.Args[2:]))
 	default:
 		usage()
 	}
@@ -380,4 +383,74 @@ func serve() error {
 	log.Printf("shutting down")
 	mgr.Shutdown()
 	return nil
+}
+
+// uninstall runs `tgbridge uninstall` and returns the exit code.
+func uninstall(args []string) int {
+	fl := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	purge := fl.Bool("purge", false, "also delete config, token, state, logs, uploads and ~/.local/bin/tgbridge")
+	yes := fl.Bool("yes", false, "don't ask before --purge deletes")
+	dry := fl.Bool("dry-run", false, "print the plan and change nothing")
+	if fl.Parse(args) != nil || fl.NArg() > 0 {
+		usage()
+	}
+	e := env()
+	cfg, err := config.Read(e.ConfigPath)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			fmt.Printf("note: %v; using default paths\n", err)
+		}
+		cfg = config.Defaults()
+	}
+	do, kept := setup.UninstallPlan(e, cfg, *purge)
+	list := func(title string, items []string) {
+		fmt.Println(title)
+		if len(items) == 0 {
+			fmt.Println("  (nothing)")
+		}
+		for _, s := range items {
+			fmt.Println("  " + s)
+		}
+	}
+	var plan []string
+	for _, a := range do {
+		plan = append(plan, a.Desc)
+	}
+	list("Plan:", plan)
+	if *dry {
+		list("Kept:", kept)
+		fmt.Println("dry run: nothing changed")
+		return 0
+	}
+	if *purge && !*yes {
+		if st, err := os.Stdin.Stat(); err != nil || st.Mode()&os.ModeCharDevice == 0 {
+			fmt.Fprintln(os.Stderr, "aborted: no terminal to confirm the deletes; use --yes")
+			return 1
+		}
+		fmt.Print("Delete these? [y/N] ")
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "\naborted: no answer; use --yes")
+			return 1
+		}
+		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+			fmt.Println("aborted: nothing changed")
+			return 1
+		}
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	var removed []string
+	code := 0
+	for _, a := range do {
+		if err := a.Do(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s: %v\n", a.Desc, err)
+			code = 1
+			continue
+		}
+		removed = append(removed, a.Desc)
+	}
+	list("Removed:", removed)
+	list("Kept:", kept)
+	return code
 }

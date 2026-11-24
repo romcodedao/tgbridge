@@ -87,3 +87,17 @@ func TestUninstallRemovesOnlyOurs(t *testing.T) {
 		t.Fatal("empty Notification left behind")
 	}
 }
+
+func TestUninstallNoSettings(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	var mcp []string
+	if err := Uninstall(p, func(a ...string) error { mcp = append(mcp, strings.Join(a, " ")); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatalf("settings.json created: %v", err)
+	}
+	if len(mcp) != 1 || mcp[0] != "mcp remove --scope user tgbridge" {
+		t.Fatalf("mcp=%v", mcp)
+	}
+}
