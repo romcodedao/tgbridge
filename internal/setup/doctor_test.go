@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,9 +42,9 @@ func TestDoctorFails(t *testing.T) {
 func TestDoctorThreadedModeOff(t *testing.T) {
 	r := newRig(t)
 	r.bot.topics = false
-	os.MkdirAll(filepath.Dir(r.env.ConfigPath), 0o700)
-	os.WriteFile(r.env.ConfigPath, []byte("owner_id: 7\n"), 0o600)
-	os.WriteFile(r.tokenPath(), []byte(goodToken), 0o600)
+	must(t, os.MkdirAll(filepath.Dir(r.env.ConfigPath), 0o700))
+	must(t, os.WriteFile(r.env.ConfigPath, []byte("owner_id: 7\n"), 0o600))
+	must(t, os.WriteFile(r.tokenPath(), []byte(goodToken), 0o600))
 	if s := doctorText(Doctor(context.Background(), r.env)); !strings.Contains(s, "Threaded Mode") {
 		t.Errorf("want the Threaded Mode fix:\n%s", s)
 	}
@@ -51,11 +52,11 @@ func TestDoctorThreadedModeOff(t *testing.T) {
 
 func TestDoctorAllOK(t *testing.T) {
 	r := newRig(t)
-	os.MkdirAll(filepath.Dir(r.env.ConfigPath), 0o700)
-	os.WriteFile(r.env.ConfigPath, []byte("owner_id: 7\n"), 0o600)
-	os.WriteFile(r.tokenPath(), []byte(goodToken), 0o600)
-	os.MkdirAll(filepath.Dir(r.env.ClaudeSettings), 0o700)
-	os.WriteFile(r.env.ClaudeSettings, []byte(`{"hooks":{"Stop":[{"hooks":[{"command":"/b/tgbridge hook Stop"}]}]}}`), 0o600)
+	must(t, os.MkdirAll(filepath.Dir(r.env.ConfigPath), 0o700))
+	must(t, os.WriteFile(r.env.ConfigPath, []byte("owner_id: 7\n"), 0o600))
+	must(t, os.WriteFile(r.tokenPath(), []byte(goodToken), 0o600))
+	must(t, os.MkdirAll(filepath.Dir(r.env.ClaudeSettings), 0o700))
+	must(t, os.WriteFile(r.env.ClaudeSettings, []byte(`{"hooks":{"Stop":[{"hooks":[{"command":"/b/tgbridge hook Stop"}]}]}}`), 0o600))
 	r.svc.installed, r.svc.active = true, true
 	cs := Doctor(context.Background(), r.env)
 	for _, c := range cs {
@@ -66,5 +67,16 @@ func TestDoctorAllOK(t *testing.T) {
 	}
 	if s := doctorText(cs); !strings.Contains(s, "@testbot") {
 		t.Errorf("want the bot name:\n%s", s)
+	}
+}
+
+func TestDoctorLingerWithoutUSER(t *testing.T) {
+	r := newRig(t)
+	t.Setenv("USER", "")
+	u, err := user.Current()
+	must(t, err)
+	r.env.Run, _ = fake(map[string]string{"loginctl show-user " + u.Username + " -p Linger --value": "yes\n"}, nil)
+	if s := doctorText(Doctor(context.Background(), r.env)); !strings.Contains(s, "ok    linger") {
+		t.Errorf("want linger read for the current user:\n%s", s)
 	}
 }

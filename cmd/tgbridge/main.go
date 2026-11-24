@@ -105,12 +105,18 @@ func main() {
 		if len(os.Args) > 2 && !noSvc {
 			usage()
 		}
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
 		in := bufio.NewReader(os.Stdin)
-		if err := setup.Init(context.Background(), env(), setup.Prompt{In: in, Out: os.Stdout, Secret: secret(in)}, noSvc); err != nil {
-			log.Fatal(err)
+		if err := setup.Init(ctx, env(), setup.Prompt{In: in, Out: os.Stdout, Secret: secret(in)}, noSvc); err != nil {
+			stop()
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
 		}
 	case "doctor":
-		cs := setup.Doctor(context.Background(), env())
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		cs := setup.Doctor(ctx, env())
 		setup.Print(os.Stdout, cs)
 		if setup.Failed(cs) {
 			os.Exit(1)
@@ -188,7 +194,10 @@ func ver() string {
 	return version
 }
 
+// run is setup's Runner; every child command gets at most 30s.
 func run(ctx context.Context, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
 }
@@ -200,7 +209,7 @@ func env() setup.Env {
 		Example: tgbridge.ExampleConfig, Run: run, LookPath: exec.LookPath, Svc: svc, ClaudeSettings: claudeSettings()}
 }
 
-// secret reads a line from in with terminal echo off; Ctrl+C restores echo before exiting.
+// secret reads a line from in with terminal echo off; Ctrl+C (or TERM, HUP, QUIT) restores echo before exiting.
 func secret(in *bufio.Reader) func() (string, error) {
 	return func() (string, error) {
 		stty := func(arg string) {
@@ -209,7 +218,7 @@ func secret(in *bufio.Reader) func() (string, error) {
 			_ = c.Run() // not a terminal (piped input): nothing to hide
 		}
 		sig := make(chan os.Signal, 1)
-		signal.Notify(sig, os.Interrupt)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 		done := make(chan struct{})
 		defer func() { signal.Stop(sig); close(done) }()
 		go func() {

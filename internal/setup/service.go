@@ -146,11 +146,10 @@ func (s systemd) Install(ctx context.Context, bin, pathEnv string) error {
 	return nil
 }
 
+// Stop runs even without a unit file (one may still be running) and, like launchd, ignores "not loaded".
 func (s systemd) Stop(ctx context.Context) error {
-	if !s.Installed() {
-		return nil
-	}
-	return s.ctl(ctx, "stop", "tgbridge")
+	_ = s.ctl(ctx, "stop", "tgbridge")
+	return nil
 }
 
 func (s systemd) Uninstall(ctx context.Context) error {

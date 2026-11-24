@@ -182,10 +182,11 @@ func TestLaunchdBootstrapRetry(t *testing.T) {
 	}
 }
 
+// A unit can be running even when its file is gone, so Stop always asks systemd and ignores errors.
 func TestSystemdStopNotInstalled(t *testing.T) {
-	run, calls := fake(nil, nil)
+	run, calls := fake(nil, map[string]error{"systemctl --user stop tgbridge": errors.New("not loaded")})
 	s, _ := ForOS("linux", t.TempDir(), run)
-	if err := s.Stop(context.Background()); err != nil || len(*calls) != 0 {
+	if err := s.Stop(context.Background()); err != nil || !reflect.DeepEqual(*calls, []string{"systemctl --user stop tgbridge"}) {
 		t.Fatalf("%v %v", err, *calls)
 	}
 }

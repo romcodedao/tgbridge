@@ -144,6 +144,13 @@ func prompt(t *testing.T, in string, secrets ...string) (Prompt, *bytes.Buffer, 
 	}}, out, n
 }
 
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func mode(t *testing.T, p string) os.FileMode {
 	st, err := os.Stat(p)
 	if err != nil {
@@ -275,7 +282,7 @@ func TestSetOwner(t *testing.T) {
 		"prepend": {"# head\nfoo: 1\n", "owner_id: 42\n# head\nfoo: 1\n"},
 	} {
 		p := filepath.Join(dir, name)
-		os.WriteFile(p, []byte(c[0]), 0o600)
+		must(t, os.WriteFile(p, []byte(c[0]), 0o600))
 		if err := SetOwner(p, 42); err != nil {
 			t.Fatal(err)
 		}
@@ -287,11 +294,61 @@ func TestSetOwner(t *testing.T) {
 
 func TestInitOfflineKeepsToken(t *testing.T) {
 	r := newRig(t)
-	os.MkdirAll(filepath.Dir(r.env.ConfigPath), 0o700)
-	os.WriteFile(r.tokenPath(), []byte(goodToken), 0o600)
+	must(t, os.MkdirAll(filepath.Dir(r.env.ConfigPath), 0o700))
+	must(t, os.WriteFile(r.tokenPath(), []byte(goodToken), 0o600))
 	r.env.TelegramBase = "http://127.0.0.1:1" // nothing listens: a network error, not a bad token
 	p, _, n := prompt(t, "")
 	if err := Init(context.Background(), r.env, p, false); err == nil || *n != 0 || read(t, r.tokenPath()) != goodToken {
 		t.Fatalf("offline must fail without asking for a new token: err=%v asks=%d", err, *n)
+	}
+}
+
+func TestInitOwnerAnswers(t *testing.T) {
+	for in, want := range map[string]string{"\n": "7", "YES\n": "7", " y \n": "7", "x\ny\n": "7", "no\ny\n": "8"} {
+		r := newRig(t, 7, 8)
+		p, out, _ := prompt(t, in, goodToken)
+		if err := Init(context.Background(), r.env, p, false); err != nil {
+			t.Fatalf("%q: %v\n%s", in, err, out)
+		}
+		if c := read(t, r.env.ConfigPath); !strings.Contains(c, "owner_id: "+want+"\n") {
+			t.Errorf("%q: want owner %s:\n%s", in, want, c)
+		}
+		polls := strings.Count(strings.Join(r.ev.list(), " "), "getUpdates")
+		if in == "x\ny\n" && (polls != 1 || !strings.Contains(out.String(), "Please answer y or n")) {
+			t.Errorf("an unclear answer must ask again without polling: polls=%d\n%s", polls, out)
+		}
+	}
+	r := newRig(t, 7)
+	p, _, _ := prompt(t, "", goodToken)
+	if err := Init(context.Background(), r.env, p, false); err == nil {
+		t.Fatal("EOF must be an error")
+	}
+}
+
+func TestInitCancelledAfterStopSaysServiceStopped(t *testing.T) {
+	r := newRig(t) // no sender: FirstSender waits until cancelled
+	r.svc.installed, r.svc.active = true, true
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	p, out, _ := prompt(t, "", goodToken)
+	if err := Init(ctx, r.env, p, false); err == nil {
+		t.Fatal("want the cancel error")
+	}
+	if !strings.Contains(out.String(), "service is stopped; start it with: tgbridge service install") {
+		t.Fatalf("want the restart hint:\n%s", out)
+	}
+}
+
+func TestInitTightensConfigDir(t *testing.T) {
+	r := newRig(t, 7)
+	must(t, os.MkdirAll(filepath.Dir(r.env.ConfigPath), 0o755))
+	p, _, _ := prompt(t, "y\n", goodToken)
+	must(t, Init(context.Background(), r.env, p, false))
+	if mode(t, filepath.Dir(r.env.ConfigPath)) != 0o700 || mode(t, r.env.ConfigPath) != 0o600 || mode(t, r.tokenPath()) != 0o600 {
+		t.Fatal("dir 0700, files 0600")
+	}
+	ents, _ := os.ReadDir(filepath.Dir(r.env.ConfigPath))
+	if len(ents) != 2 {
+		t.Fatalf("temp files left behind: %v", ents)
 	}
 }

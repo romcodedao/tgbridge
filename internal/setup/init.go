@@ -26,18 +26,28 @@ type Prompt struct {
 var activeWait = 5 * time.Second
 
 // Init sets up tgbridge step by step, skipping every step that is already done, then prints the doctor summary.
-func Init(ctx context.Context, e Env, p Prompt, noService bool) error {
+func Init(ctx context.Context, e Env, p Prompt, noService bool) (err error) {
 	say := func(f string, a ...any) { fmt.Fprintf(p.Out, f+"\n", a...) }
+	stopped := false // the owner step stopped a running service
+	defer func() {
+		if err != nil && stopped {
+			say("service is stopped; start it with: tgbridge service install")
+		}
+	}()
 
 	say("Claude Code:")
 	ci, cerr := DetectClaude(ctx, e.ClaudeBin(), e.LookPath, e.Run)
 	Print(p.Out, ClaudeChecks(ci, cerr))
 
+	dir := filepath.Dir(e.ConfigPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil { // the token usually lives here too
+		return err
+	}
 	if _, err := os.Stat(e.ConfigPath); missing(err) {
-		if err := os.MkdirAll(filepath.Dir(e.ConfigPath), 0o700); err != nil {
-			return err
-		}
-		if err := os.WriteFile(e.ConfigPath, e.Example, 0o600); err != nil {
+		if err := writeSecret(e.ConfigPath, e.Example); err != nil {
 			return err
 		}
 		say("Wrote %s", e.ConfigPath)
@@ -79,10 +89,7 @@ func Init(ctx context.Context, e Env, p Prompt, noService bool) error {
 			if err := os.MkdirAll(filepath.Dir(cfg.TokenFile), 0o700); err != nil {
 				return err
 			}
-			if err := os.WriteFile(cfg.TokenFile, []byte(tok), 0o600); err != nil {
-				return err
-			}
-			if err := os.Chmod(cfg.TokenFile, 0o600); err != nil {
+			if err := writeSecret(cfg.TokenFile, []byte(tok)); err != nil {
 				return err
 			}
 			say("Saved the token to %s", cfg.TokenFile)
@@ -92,7 +99,7 @@ func Init(ctx context.Context, e Env, p Prompt, noService bool) error {
 	say("Bot: @%s", me.Username)
 
 	if cfg.OwnerID == 0 {
-		if err := askOwner(ctx, e, p, me, token, say); err != nil {
+		if err := askOwner(ctx, e, p, me, token, say, &stopped); err != nil {
 			return err
 		}
 	}
@@ -126,11 +133,12 @@ func Init(ctx context.Context, e Env, p Prompt, noService bool) error {
 
 // askOwner finds the owner from the first private message to the bot.
 // A running service also reads getUpdates (409 Conflict), so it is stopped first.
-func askOwner(ctx context.Context, e Env, p Prompt, me *telegram.User, token string, say func(string, ...any)) error {
+func askOwner(ctx context.Context, e Env, p Prompt, me *telegram.User, token string, say func(string, ...any), stopped *bool) error {
 	if e.Svc != nil && e.Svc.Active(ctx) {
 		if err := e.Svc.Stop(ctx); err != nil {
 			return fmt.Errorf("stop the service: %w", err)
 		}
+		*stopped = true
 	}
 	tg := telegram.New(token, e.TelegramBase)
 	since := time.Now().Add(-time.Minute) // clock skew margin
@@ -144,12 +152,12 @@ func askOwner(ctx context.Context, e Env, p Prompt, me *telegram.User, token str
 		if u.Username != "" {
 			name += " (@" + u.Username + ")"
 		}
-		fmt.Fprintf(p.Out, "Message from %s, user ID %d. This account will control Claude on this machine.\nIs this you? [Y/n] ", name, u.ID)
-		ans, err := p.In.ReadString('\n')
-		if err != nil && ans == "" {
-			return fmt.Errorf("read answer: %w", err)
+		fmt.Fprintf(p.Out, "Message from %s, user ID %d. This account will control Claude on this machine.\n", name, u.ID)
+		yes, err := confirm(ctx, p)
+		if err != nil {
+			return err
 		}
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(ans)), "n") {
+		if !yes {
 			say("Waiting for the next message...")
 			continue
 		}
@@ -159,6 +167,60 @@ func askOwner(ctx context.Context, e Env, p Prompt, me *telegram.User, token str
 		say("Saved owner_id: %d", u.ID)
 		return nil
 	}
+}
+
+// confirm asks "Is this you?" until the answer is yes ("", y, yes) or no (n, no).
+func confirm(ctx context.Context, p Prompt) (bool, error) {
+	for {
+		fmt.Fprint(p.Out, "Is this you? [Y/n] ")
+		ans, err := readLine(ctx, p.In)
+		if err != nil {
+			return false, fmt.Errorf("read answer: %w", err)
+		}
+		switch strings.ToLower(strings.TrimSpace(ans)) {
+		case "", "y", "yes":
+			return true, nil
+		case "n", "no":
+			return false, nil
+		}
+		fmt.Fprintln(p.Out, "Please answer y or n")
+	}
+}
+
+// readLine reads one line, returning early when ctx is cancelled; an unterminated last line counts.
+func readLine(ctx context.Context, in *bufio.Reader) (string, error) {
+	type res struct {
+		s   string
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() { s, err := in.ReadString('\n'); ch <- res{s, err} }() // shortcut: leaks a blocked reader on cancel; init exits right after
+	select {
+	case r := <-ch:
+		if r.err != nil && r.s != "" {
+			r.err = nil
+		}
+		return r.s, r.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// writeSecret replaces path atomically with a 0600 file.
+func writeSecret(path string, b []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*") // created 0600
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name()) // no-op after the rename
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }
 
 var ownerLine = regexp.MustCompile(`(?m)^owner_id:.*$`)
@@ -175,8 +237,5 @@ func SetOwner(path string, id int64) error {
 	} else {
 		b = append([]byte(line+"\n"), b...)
 	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o600)
+	return writeSecret(path, b)
 }

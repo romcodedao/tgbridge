@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
 	"strings"
 	"time"
 
@@ -71,7 +72,11 @@ func Doctor(ctx context.Context, e Env) []Check {
 	}
 
 	if e.GOOS == "linux" {
-		out, _ := e.Run(ctx, "loginctl", "show-user", os.Getenv("USER"), "-p", "Linger", "--value")
+		name := os.Getenv("USER")
+		if u, err := user.Current(); name == "" && err == nil {
+			name = u.Username
+		}
+		out, _ := e.Run(ctx, "loginctl", "show-user", name, "-p", "Linger", "--value")
 		if strings.TrimSpace(out) == "yes" {
 			cs = append(cs, Check{OK, "linger", "on: the service runs while you're logged out", ""})
 		} else {
