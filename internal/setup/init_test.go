@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -98,7 +99,7 @@ func (s *fakeSvc) Installed() bool                 { return s.installed }
 func (s *fakeSvc) Active(context.Context) bool     { return s.active }
 func (s *fakeSvc) Uninstall(context.Context) error { s.installed = false; return nil }
 func (s *fakeSvc) Stop(context.Context) error      { s.ev.add("stop"); s.active = false; return nil }
-func (s *fakeSvc) Install(_ context.Context, bin, path string, env map[string]string) (string, error) {
+func (s *fakeSvc) Install(_ context.Context, bin, _, path string, env map[string]string) (string, error) {
 	s.ev.add("install")
 	s.installs++
 	s.installed, s.active, s.env = true, true, env
@@ -510,29 +511,61 @@ func TestInitBufferedNewlineDoesNotConfirm(t *testing.T) {
 	}
 }
 
-// Re-running init with an unchanged unit and a running service must not restart it (that ends a Claude turn).
-func TestInitRerunKeepsRunningService(t *testing.T) {
-	r := newRig(t, 7)
-	run, calls := fake(map[string]string{
-		"/x/claude --version":                 "2.1.0 (Claude Code)",
-		"/x/claude auth status":               `{"loggedIn":true,"authMethod":"claude.ai"}`,
-		"systemctl --user is-active tgbridge": "active\n",
-	}, nil)
-	r.env.Run = run
-	r.env.Svc, _ = ForOS("linux", r.home, run)
-	p, out, _ := prompt(t, "y\n", goodToken)
+// Re-running init keeps a running service when nothing changed, and restarts it when the binary at the same path was
+// replaced (install.sh or make setup): the unit names the binary's version and sha256.
+func TestInitRerunRestartsOnlyForNewBinary(t *testing.T) {
+	uid := strconv.Itoa(os.Getuid())
+	for _, c := range []struct{ goos, activeCmd, activeOut, restartCmd string }{
+		{"linux", "systemctl --user is-active tgbridge", "active\n", "systemctl --user restart tgbridge"},
+		{"darwin", "launchctl print gui/" + uid + "/io.github.romcodedao.tgbridge", "state = running", "launchctl bootstrap gui/" + uid},
+	} {
+		t.Run(c.goos, func(t *testing.T) {
+			r := newRig(t, 7)
+			t.Setenv("TMPDIR", filepath.Join(r.home, "tmp")) // the binary below must not look like a go run build
+			r.env.Bin = filepath.Join(r.home, ".local/bin/tgbridge")
+			must(t, write(r.env.Bin, "binary v1"))
+			run, calls := fake(map[string]string{
+				"/x/claude --version":   "2.1.0 (Claude Code)",
+				"/x/claude auth status": `{"loggedIn":true,"authMethod":"claude.ai"}`,
+				c.activeCmd:             c.activeOut,
+			}, nil)
+			r.env.Run, r.env.GOOS = run, c.goos
+			r.env.Svc, _ = ForOS(c.goos, r.home, run)
+			restarts := func() int { return strings.Count(strings.Join(*calls, "\n"), c.restartCmd) }
+			initOnce := func(in string, secrets ...string) {
+				t.Helper()
+				p, out, _ := prompt(t, in, secrets...)
+				if err := Init(context.Background(), r.env, p, false); err != nil {
+					t.Fatalf("%v\n%s", err, out)
+				}
+			}
+			initOnce("y\n", goodToken)
+			if restarts() != 1 {
+				t.Fatalf("first run must start the service: %v", *calls)
+			}
+			initOnce("")
+			if restarts() != 1 {
+				t.Fatalf("same path, same binary: no restart, got %v", *calls)
+			}
+			must(t, write(r.env.Bin, "binary v2")) // an upgrade replaces the file in place
+			initOnce("")
+			if restarts() != 2 {
+				t.Fatalf("same path, new binary: must restart, got %v", *calls)
+			}
+		})
+	}
+}
+
+// Typed-ahead terminal input is flushed right before each "Is this you?".
+func TestInitFlushesBeforeConfirm(t *testing.T) {
+	r := newRig(t, 7, 8)
+	p, out, _ := prompt(t, "n\ny\n", goodToken)
+	p.Flush = func() { out.WriteString("<flush>") }
 	if err := Init(context.Background(), r.env, p, false); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	restarts := func() int { return strings.Count(strings.Join(*calls, "\n"), "systemctl --user restart tgbridge") }
-	if restarts() != 1 {
-		t.Fatalf("first run must start the service: %v", *calls)
-	}
-	p, out, _ = prompt(t, "")
-	if err := Init(context.Background(), r.env, p, false); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if restarts() != 1 {
-		t.Fatalf("re-run with an unchanged unit restarted the service: %v", *calls)
+	s := out.String()
+	if strings.Count(s, "<flush>Is this you?") != 2 || strings.Count(s, "<flush>") != 2 {
+		t.Fatalf("want a flush right before each confirm:\n%s", s)
 	}
 }

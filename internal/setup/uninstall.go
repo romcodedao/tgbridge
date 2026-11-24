@@ -151,7 +151,8 @@ func planned(do []Action, p string) bool {
 type UninstallOpts struct{ Purge, Yes, DryRun bool }
 
 // RunUninstall prints the plan and carries it out: tgbridge uninstall. --purge asks first on a terminal unless Yes is set.
-func RunUninstall(ctx context.Context, e Env, cfg *config.Config, o UninstallOpts, in io.Reader, out io.Writer) error {
+// Step errors go to errOut as they happen; the returned error sums up.
+func RunUninstall(ctx context.Context, e Env, cfg *config.Config, o UninstallOpts, in io.Reader, out, errOut io.Writer) error {
 	if e.Home == "" {
 		return errors.New("error: can't find your home folder (set HOME); nothing changed")
 	}
@@ -193,7 +194,7 @@ func RunUninstall(ctx context.Context, e Env, cfg *config.Config, o UninstallOpt
 	failed := false
 	for _, a := range do {
 		if err := a.Do(ctx); err != nil {
-			fmt.Fprintf(out, "error: %s: %v\n", a.Desc, err)
+			fmt.Fprintf(errOut, "error: %s: %v\n", a.Desc, err)
 			failed = true
 			continue
 		}

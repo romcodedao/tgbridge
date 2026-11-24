@@ -3,9 +3,12 @@ package setup
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -26,7 +29,8 @@ type Service interface {
 	Active(ctx context.Context) bool
 	// Install writes the unit with PATH and env, then (re)starts it unless the unit is unchanged and already running,
 	// so a re-run doesn't end a Claude turn. A hand-edited unit is saved first: bak is its path, or "".
-	Install(ctx context.Context, bin, pathEnv string, env map[string]string) (bak string, err error)
+	// version and bin's sha256 are written into the unit, so an upgraded binary at the same path changes it.
+	Install(ctx context.Context, bin, version, pathEnv string, env map[string]string) (bak string, err error)
 	Stop(ctx context.Context) error
 	Uninstall(ctx context.Context) error
 }
@@ -75,13 +79,27 @@ func ServiceEnv(configPath string) map[string]string {
 	return map[string]string{"TGBRIDGE_CONFIG": configPath}
 }
 
-// SystemdUnit renders the user unit.
-func SystemdUnit(bin, pathEnv string, env map[string]string) string {
+// stamp names the binary the unit runs: "tgbridge <version> sha256:<hex>" (an empty hash when bin can't be read).
+func stamp(bin, version string) string {
+	sum := ""
+	if f, err := os.Open(bin); err == nil {
+		h := sha256.New()
+		if _, err := io.Copy(h, f); err == nil {
+			sum = hex.EncodeToString(h.Sum(nil))
+		}
+		f.Close()
+	}
+	return strings.NewReplacer("\n", " ", "--", "-").Replace("tgbridge " + version + " sha256:" + sum) // safe in a unit and an XML comment
+}
+
+// SystemdUnit renders the user unit; stamp is a comment line naming the binary.
+func SystemdUnit(bin, stamp, pathEnv string, env map[string]string) string {
 	extra := ""
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		extra += `Environment="` + pct(k+"="+env[k]) + "\"\n"
 	}
-	return `[Unit]
+	return "# " + stamp + `
+[Unit]
 Description=tgbridge - Claude Code over Telegram
 After=network-online.target
 
@@ -96,13 +114,14 @@ WantedBy=default.target
 `
 }
 
-// LaunchdPlist renders the launch agent.
-func LaunchdPlist(bin, pathEnv, logPath string, env map[string]string) string {
+// LaunchdPlist renders the launch agent; stamp is a comment naming the binary.
+func LaunchdPlist(bin, stamp, pathEnv, logPath string, env map[string]string) string {
 	extra := ""
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		extra += "<key>" + esc(k) + "</key><string>" + esc(env[k]) + "</string>"
 	}
 	return `<?xml version="1.0" encoding="UTF-8"?>
+<!-- ` + esc(stamp) + ` -->
 <plist version="1.0"><dict>
 <key>Label</key><string>` + label + `</string>
 <key>ProgramArguments</key><array><string>` + esc(bin) + `</string><string>serve</string></array>
@@ -186,8 +205,8 @@ func (s systemd) Active(ctx context.Context) bool {
 	return strings.TrimSpace(out) == "active"
 }
 
-func (s systemd) Install(ctx context.Context, bin, pathEnv string, env map[string]string) (string, error) {
-	bak, changed, err := writeUnit(s.Path(), SystemdUnit(bin, pathEnv, env))
+func (s systemd) Install(ctx context.Context, bin, version, pathEnv string, env map[string]string) (string, error) {
+	bak, changed, err := writeUnit(s.Path(), SystemdUnit(bin, stamp(bin, version), pathEnv, env))
 	if err != nil {
 		return "", err
 	}
@@ -236,12 +255,12 @@ func (l launchd) Active(ctx context.Context) bool {
 	return strings.Contains(out, "state = running")
 }
 
-func (l launchd) Install(ctx context.Context, bin, pathEnv string, env map[string]string) (string, error) {
+func (l launchd) Install(ctx context.Context, bin, version, pathEnv string, env map[string]string) (string, error) {
 	log := filepath.Join(l.home, "Library/Logs/tgbridge.log")
 	if err := os.MkdirAll(filepath.Dir(log), 0o755); err != nil {
 		return "", err
 	}
-	bak, changed, err := writeUnit(l.Path(), LaunchdPlist(bin, pathEnv, log, env))
+	bak, changed, err := writeUnit(l.Path(), LaunchdPlist(bin, stamp(bin, version), pathEnv, log, env))
 	if err != nil {
 		return "", err
 	}

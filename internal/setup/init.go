@@ -16,10 +16,12 @@ import (
 )
 
 // Prompt is where init asks its questions. Secret reads a line without echo.
+// Flush, if set, drops typed-ahead terminal input before "Is this you?".
 type Prompt struct {
 	In     *bufio.Reader
 	Out    io.Writer
 	Secret func() (string, error)
+	Flush  func()
 }
 
 // activeWait is how long init waits for the service to come up after installing it.
@@ -130,7 +132,7 @@ func Init(ctx context.Context, e Env, p Prompt, noService bool) (err error) {
 	case inTemp(e.Bin):
 		say("Skipped the service: the service will run %s, a temporary file; install tgbridge first (see docs/install.md)", e.Bin)
 	default:
-		bak, err := e.Svc.Install(ctx, e.Bin, ServicePATH(ci.Path), ServiceEnv(e.ConfigPath))
+		bak, err := e.Svc.Install(ctx, e.Bin, e.Version, ServicePATH(ci.Path), ServiceEnv(e.ConfigPath))
 		if bak != "" {
 			say("previous unit saved to %s", bak)
 		}
@@ -183,6 +185,9 @@ func askOwner(ctx context.Context, e Env, p Prompt, me *telegram.User, token str
 			name += " (@" + u.Username + ")"
 		}
 		fmt.Fprintf(p.Out, "Message from %s, user ID %d. This account will control Claude on this machine.\n", name, u.ID)
+		if p.Flush != nil {
+			p.Flush()
+		}
 		yes, err := confirm(ctx, p)
 		if err != nil {
 			return err

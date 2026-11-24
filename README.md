@@ -64,7 +64,7 @@ Check the name before you answer `y` (Enter alone means no, and init waits for t
 
 To keep it running after you log out on Linux: `sudo loginctl enable-linger $USER` (`tgbridge doctor` tells you if it's off).
 
-`init` is safe to re-run. It skips what is already done and fixes what is broken; it restarts the service only if its unit changed (or the service isn't running).
+`init` is safe to re-run. It skips what is already done and fixes what is broken; it restarts the service only if its unit changed, as after an upgrade, or the service isn't running.
 
 **Read it first.** To read the script before it runs:
 

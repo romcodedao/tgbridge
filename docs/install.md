@@ -36,7 +36,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/romcoded
 | Service | Installs and starts the systemd user unit or launchd agent. A custom `TGBRIDGE_CONFIG` is written into it. If the existing file was edited by hand, it's copied to `<file>.bak` first. `--no-service` skips this, and so does a binary in the temp folder (`go run`). |
 | Summary | Runs `tgbridge doctor`. |
 
-Run `tgbridge init` again at any time: finished steps ask nothing and change nothing. Re-running init restarts the service only if its unit changed (for example, the binary moved) or the service isn't running; a restart ends any Claude turn that is running. `tgbridge service install` always restarts it, to apply a config change.
+Run `tgbridge init` again at any time: finished steps ask nothing and change nothing. Re-running init restarts the service only if its unit changed (the unit names the binary's path, version and sha256, so an upgrade counts) or the service isn't running; a restart ends any Claude turn that is running. `tgbridge service install` always restarts it, to apply a config change.
 
 ## Release tarball by hand
 

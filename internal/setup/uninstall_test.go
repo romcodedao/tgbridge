@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -344,19 +345,19 @@ func TestRunUninstall(t *testing.T) {
 
 	before := tree(t, e.Home)
 	var out strings.Builder
-	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true, DryRun: true}, strings.NewReader(""), &out); err != nil {
+	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true, DryRun: true}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(tree(t, e.Home), before) || len(*calls) != 0 || !strings.Contains(out.String(), "dry run: nothing changed") {
 		t.Fatalf("--dry-run changed something or ran %v:\n%s", *calls, out.String())
 	}
 
-	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true}, strings.NewReader("\n"), io.Discard); err == nil || !reflect.DeepEqual(tree(t, e.Home), before) {
+	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true}, strings.NewReader("\n"), io.Discard, io.Discard); err == nil || !reflect.DeepEqual(tree(t, e.Home), before) {
 		t.Fatalf("an empty answer must abort and change nothing: %v", err)
 	}
 
 	out.Reset()
-	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true, Yes: true}, strings.NewReader(""), &out); err != nil {
+	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true, Yes: true}, strings.NewReader(""), &out, io.Discard); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	var got struct {
@@ -381,5 +382,17 @@ func TestRunUninstall(t *testing.T) {
 	}
 	if c := strings.Join(*calls, "\n"); !strings.Contains(c, "systemctl --user disable --now tgbridge") || !strings.Contains(c, "claude mcp remove --scope user tgbridge") {
 		t.Fatalf("calls %v", *calls)
+	}
+}
+
+// A failed step is reported on errOut, not mixed into the plan on out.
+func TestRunUninstallStepErrorToErrOut(t *testing.T) {
+	e, cfg, _ := uninstallRig(t, "linux")
+	run, _ := fake(nil, map[string]error{"systemctl --user daemon-reload": errors.New("boom")})
+	e.Svc, _ = ForOS("linux", e.Home, run)
+	var out, errOut strings.Builder
+	err := RunUninstall(context.Background(), e, cfg, UninstallOpts{}, strings.NewReader(""), &out, &errOut)
+	if err == nil || !strings.Contains(errOut.String(), "error: stop and remove ") || !strings.Contains(errOut.String(), "boom") || strings.Contains(out.String(), "boom") {
+		t.Fatalf("err=%v\nout:\n%s\nerrOut:\n%s", err, out.String(), errOut.String())
 	}
 }

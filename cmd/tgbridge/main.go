@@ -111,7 +111,7 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		in := bufio.NewReader(os.Stdin)
-		if err := setup.Init(ctx, env(), setup.Prompt{In: in, Out: os.Stdout, Secret: secret(in)}, noSvc); err != nil {
+		if err := setup.Init(ctx, env(), setup.Prompt{In: in, Out: os.Stdout, Secret: secret(in), Flush: flushInput}, noSvc); err != nil {
 			stop()
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
@@ -241,6 +241,13 @@ func secret(in *bufio.Reader) func() (string, error) {
 	}
 }
 
+// flushInput drops unread terminal input (keys typed or pasted ahead), only when stdin is a terminal.
+func flushInput() {
+	if st, err := os.Stdin.Stat(); err == nil && st.Mode()&os.ModeCharDevice != 0 {
+		flushTTY(uintptr(syscall.Stdin))
+	}
+}
+
 // service runs `tgbridge service <cmd>` and returns the exit code.
 func service(cmd string) int {
 	e, ctx := env(), context.Background()
@@ -253,7 +260,7 @@ func service(cmd string) int {
 	case "install":
 		claude, _ := exec.LookPath(e.ClaudeBin())
 		_ = e.Svc.Stop(ctx) // Install skips the restart of an unchanged running unit; this command must apply config changes
-		bak, err := e.Svc.Install(ctx, e.Bin, setup.ServicePATH(claude), setup.ServiceEnv(e.ConfigPath))
+		bak, err := e.Svc.Install(ctx, e.Bin, e.Version, setup.ServicePATH(claude), setup.ServiceEnv(e.ConfigPath))
 		if bak != "" {
 			fmt.Printf("previous unit saved to %s\n", bak)
 		}
@@ -408,7 +415,7 @@ func uninstall(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if err := setup.RunUninstall(ctx, env(), cfg, setup.UninstallOpts{Purge: *purge, Yes: *yes, DryRun: *dry}, os.Stdin, os.Stdout); err != nil {
+	if err := setup.RunUninstall(ctx, env(), cfg, setup.UninstallOpts{Purge: *purge, Yes: *yes, DryRun: *dry}, os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
