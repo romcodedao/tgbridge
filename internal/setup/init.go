@@ -83,6 +83,10 @@ func Init(ctx context.Context, e Env, p Prompt, noService bool) (err error) {
 				return fmt.Errorf("read token: %w", err)
 			}
 			tok = strings.TrimSpace(tok)
+			if !tokenFormat.MatchString(tok) {
+				say("that doesn't look like a bot token (123456:ABC...)")
+				continue
+			}
 			m, err := getMe(ctx, e, tok)
 			if err != nil {
 				say("That token didn't work (%v).", err)
@@ -167,6 +171,8 @@ func askOwner(ctx context.Context, e Env, p Prompt, me *telegram.User, token str
 	tg := telegram.New(token, e.TelegramBase)
 	since := time.Now().Add(-time.Minute) // clock skew margin
 	say("Send any message to @%s now, in a private chat (Ctrl+C to cancel)...", me.Username)
+	// Drop what is left from the token line (a pasted token's extra newline), so only a fresh answer confirms.
+	_, _ = p.In.Discard(p.In.Buffered())
 	for {
 		u, err := tg.FirstSender(ctx, since)
 		if err != nil {
@@ -193,18 +199,18 @@ func askOwner(ctx context.Context, e Env, p Prompt, me *telegram.User, token str
 	}
 }
 
-// confirm asks "Is this you?" until the answer is yes ("", y, yes) or no (n, no).
+// confirm asks "Is this you?" until the answer is yes (y, yes) or no ("", n, no): owner_id is the bot's one access check.
 func confirm(ctx context.Context, p Prompt) (bool, error) {
 	for {
-		fmt.Fprint(p.Out, "Is this you? [Y/n] ")
+		fmt.Fprint(p.Out, "Is this you? [y/N] ")
 		ans, err := readLine(ctx, p.In)
 		if err != nil {
 			return false, fmt.Errorf("read answer: %w", err)
 		}
 		switch strings.ToLower(strings.TrimSpace(ans)) {
-		case "", "y", "yes":
+		case "y", "yes":
 			return true, nil
-		case "n", "no":
+		case "", "n", "no":
 			return false, nil
 		}
 		fmt.Fprintln(p.Out, "Please answer y or n")
@@ -263,6 +269,9 @@ func writeSecret(path string, b []byte) error {
 	}
 	return os.Rename(f.Name(), path)
 }
+
+// tokenFormat is a BotFather token: the bot ID, a colon and the secret.
+var tokenFormat = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]{30,}$`)
 
 var ownerLine = regexp.MustCompile(`(?m)^owner_id:.*$`)
 

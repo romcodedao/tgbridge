@@ -19,7 +19,10 @@ import (
 	"time"
 )
 
-const goodToken = "123:good"
+const (
+	goodToken  = "123:good-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	wrongToken = "123:wrong-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" // well formed, but Telegram rejects it
+)
 
 // events is the shared, ordered log of fake Telegram and fake service calls.
 type events struct {
@@ -46,6 +49,7 @@ func (f *fakeBot) serve(t *testing.T) string {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/bot"), "/")
 		token, method := parts[0], parts[len(parts)-1]
 		if token != goodToken {
+			f.ev.add("rejected " + token)
 			w.WriteHeader(401)
 			io.WriteString(w, `{"ok":false,"error_code":401,"description":"Unauthorized"}`)
 			return
@@ -189,7 +193,7 @@ func TestInitFreshMachine(t *testing.T) {
 		t.Fatal("service not installed")
 	}
 	s := out.String()
-	for _, w := range []string{"U4242", "4242", "Is this you? [Y/n]", "ok", "Done. Send @testbot a message"} {
+	for _, w := range []string{"U4242", "4242", "Is this you? [y/N]", "ok", "Done. Send @testbot a message"} {
 		if !strings.Contains(s, w) {
 			t.Errorf("missing %q in\n%s", w, s)
 		}
@@ -223,7 +227,7 @@ func TestInitIdempotent(t *testing.T) {
 
 func TestInitBadTokenRetries(t *testing.T) {
 	r := newRig(t, 4242)
-	p, out, n := prompt(t, "y\n", "bad", goodToken)
+	p, out, n := prompt(t, "y\n", wrongToken, goodToken)
 	if err := Init(context.Background(), r.env, p, false); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -307,7 +311,7 @@ func TestInitOfflineKeepsToken(t *testing.T) {
 }
 
 func TestInitOwnerAnswers(t *testing.T) {
-	for in, want := range map[string]string{"\n": "7", "YES\n": "7", " y \n": "7", "x\ny\n": "7", "no\ny\n": "8"} {
+	for in, want := range map[string]string{"\ny\n": "8", "YES\n": "7", " y \n": "7", "x\ny\n": "7", "no\ny\n": "8"} {
 		r := newRig(t, 7, 8)
 		p, out, _ := prompt(t, in, goodToken)
 		if err := Init(context.Background(), r.env, p, false); err != nil {
@@ -469,5 +473,39 @@ func TestSetOwnerKeepsSymlink(t *testing.T) {
 	}
 	if read(t, real) != "owner_id: 42\n" {
 		t.Fatalf("target not updated: %q", read(t, real))
+	}
+}
+
+func TestInitTokenFormat(t *testing.T) {
+	r := newRig(t, 7)
+	p, out, n := prompt(t, "y\n", "not a token", "123:short", goodToken)
+	if err := Init(context.Background(), r.env, p, false); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if *n != 3 || strings.Count(out.String(), "that doesn't look like a bot token (123456:ABC...)") != 2 {
+		t.Fatalf("want two format errors and a third ask, asks=%d:\n%s", *n, out)
+	}
+	if ev := strings.Join(r.ev.list(), " "); strings.Contains(ev, "rejected") {
+		t.Fatalf("a malformed token reached Telegram: %s", ev)
+	}
+
+	r = newRig(t)
+	p, _, _ = prompt(t, "", "x", "y", "z") // malformed tries count
+	if err := Init(context.Background(), r.env, p, false); err == nil || !strings.Contains(err.Error(), "3 tries") {
+		t.Fatalf("want the 3 tries error, got %v", err)
+	}
+}
+
+// A pasted token with an extra newline leaves a blank line in the shared reader: it must not answer "Is this you?".
+func TestInitBufferedNewlineDoesNotConfirm(t *testing.T) {
+	r := newRig(t, 7)
+	in := bufio.NewReader(strings.NewReader(goodToken + "\n\n"))
+	out := &bytes.Buffer{}
+	p := Prompt{In: in, Out: out, Secret: func() (string, error) { s, err := in.ReadString('\n'); return strings.TrimSpace(s), err }}
+	if err := Init(context.Background(), r.env, p, false); err == nil || !errors.Is(err, io.EOF) {
+		t.Fatalf("want EOF waiting for an answer, got %v\n%s", err, out)
+	}
+	if c := read(t, r.env.ConfigPath); strings.Contains(c, "owner_id: 7") {
+		t.Fatalf("owner_id saved without an answer:\n%s", c)
 	}
 }
