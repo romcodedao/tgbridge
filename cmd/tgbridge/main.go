@@ -252,6 +252,7 @@ func service(cmd string) int {
 	switch cmd {
 	case "install":
 		claude, _ := exec.LookPath(e.ClaudeBin())
+		_ = e.Svc.Stop(ctx) // Install skips the restart of an unchanged running unit; this command must apply config changes
 		bak, err := e.Svc.Install(ctx, e.Bin, setup.ServicePATH(claude), setup.ServiceEnv(e.ConfigPath))
 		if bak != "" {
 			fmt.Printf("previous unit saved to %s\n", bak)

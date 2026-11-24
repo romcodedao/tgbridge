@@ -24,7 +24,8 @@ type Service interface {
 	Path() string
 	Installed() bool
 	Active(ctx context.Context) bool
-	// Install writes the unit with PATH and env, then (re)starts it. A hand-edited unit is saved first: bak is its path, or "".
+	// Install writes the unit with PATH and env, then (re)starts it unless the unit is unchanged and already running,
+	// so a re-run doesn't end a Claude turn. A hand-edited unit is saved first: bak is its path, or "".
 	Install(ctx context.Context, bin, pathEnv string, env map[string]string) (bak string, err error)
 	Stop(ctx context.Context) error
 	Uninstall(ctx context.Context) error
@@ -135,15 +136,19 @@ func ServicePATH(claudePath string) string {
 	return strings.Join(out, ":")
 }
 
-// writeUnit writes body to path, first copying a different existing file to path.bak (returned).
-func writeUnit(path, body string) (bak string, err error) {
-	if old, err := os.ReadFile(path); err == nil && string(old) != body {
+// writeUnit writes body to path, first copying a different existing file to path.bak (returned); changed is false when path already held body.
+func writeUnit(path, body string) (bak string, changed bool, err error) {
+	old, err := os.ReadFile(path)
+	if err == nil && string(old) == body {
+		return "", false, nil
+	}
+	if err == nil {
 		bak = path + ".bak"
 		if err := os.WriteFile(bak, old, 0o644); err != nil {
-			return "", err
+			return "", false, err
 		}
 	}
-	return bak, write(path, body)
+	return bak, true, write(path, body)
 }
 
 func write(path, body string) error {
@@ -182,11 +187,15 @@ func (s systemd) Active(ctx context.Context) bool {
 }
 
 func (s systemd) Install(ctx context.Context, bin, pathEnv string, env map[string]string) (string, error) {
-	bak, err := writeUnit(s.Path(), SystemdUnit(bin, pathEnv, env))
+	bak, changed, err := writeUnit(s.Path(), SystemdUnit(bin, pathEnv, env))
 	if err != nil {
 		return "", err
 	}
-	for _, a := range [][]string{{"daemon-reload"}, {"enable", "tgbridge"}, {"restart", "tgbridge"}} {
+	steps := [][]string{{"daemon-reload"}, {"enable", "tgbridge"}}
+	if changed || !s.Active(ctx) {
+		steps = append(steps, []string{"restart", "tgbridge"})
+	}
+	for _, a := range steps {
 		if err := s.ctl(ctx, a...); err != nil {
 			return bak, err
 		}
@@ -232,9 +241,12 @@ func (l launchd) Install(ctx context.Context, bin, pathEnv string, env map[strin
 	if err := os.MkdirAll(filepath.Dir(log), 0o755); err != nil {
 		return "", err
 	}
-	bak, err := writeUnit(l.Path(), LaunchdPlist(bin, pathEnv, log, env))
+	bak, changed, err := writeUnit(l.Path(), LaunchdPlist(bin, pathEnv, log, env))
 	if err != nil {
 		return "", err
+	}
+	if !changed && l.Active(ctx) {
+		return bak, nil
 	}
 	_ = l.Stop(ctx) // not loaded yet is fine
 	// bootout is asynchronous, so an early bootstrap can fail with an I/O error.

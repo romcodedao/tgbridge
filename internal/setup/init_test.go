@@ -509,3 +509,30 @@ func TestInitBufferedNewlineDoesNotConfirm(t *testing.T) {
 		t.Fatalf("owner_id saved without an answer:\n%s", c)
 	}
 }
+
+// Re-running init with an unchanged unit and a running service must not restart it (that ends a Claude turn).
+func TestInitRerunKeepsRunningService(t *testing.T) {
+	r := newRig(t, 7)
+	run, calls := fake(map[string]string{
+		"/x/claude --version":                 "2.1.0 (Claude Code)",
+		"/x/claude auth status":               `{"loggedIn":true,"authMethod":"claude.ai"}`,
+		"systemctl --user is-active tgbridge": "active\n",
+	}, nil)
+	r.env.Run = run
+	r.env.Svc, _ = ForOS("linux", r.home, run)
+	p, out, _ := prompt(t, "y\n", goodToken)
+	if err := Init(context.Background(), r.env, p, false); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	restarts := func() int { return strings.Count(strings.Join(*calls, "\n"), "systemctl --user restart tgbridge") }
+	if restarts() != 1 {
+		t.Fatalf("first run must start the service: %v", *calls)
+	}
+	p, out, _ = prompt(t, "")
+	if err := Init(context.Background(), r.env, p, false); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if restarts() != 1 {
+		t.Fatalf("re-run with an unchanged unit restarted the service: %v", *calls)
+	}
+}

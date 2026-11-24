@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -257,5 +258,51 @@ func TestInstallBacksUpEditedUnit(t *testing.T) {
 		if err != nil || bak != s.Path()+".bak" || read(t, bak) != "hand edited" {
 			t.Fatalf("%s: %q %v", goos, bak, err)
 		}
+	}
+}
+
+// Re-running init must not restart a running service whose unit is unchanged: that would end a Claude turn.
+func TestInstallUnchangedRunningSkipsRestart(t *testing.T) {
+	uid := strconv.Itoa(os.Getuid())
+	for _, c := range []struct {
+		goos, activeCmd, activeOut string
+		restart                    func(calls []string) bool
+	}{
+		{"linux", "systemctl --user is-active tgbridge", "active\n", func(calls []string) bool { return slices.Contains(calls, "systemctl --user restart tgbridge") }},
+		{"darwin", "launchctl print gui/" + uid + "/io.github.romcodedao.tgbridge", "state = running", func(calls []string) bool {
+			return slices.ContainsFunc(calls, func(s string) bool { return strings.Contains(s, "bootstrap") || strings.Contains(s, "bootout") })
+		}},
+	} {
+		t.Run(c.goos, func(t *testing.T) {
+			home := t.TempDir()
+			install := func(active bool, bin string) []string {
+				out := map[string]string{}
+				if active {
+					out[c.activeCmd] = c.activeOut
+				}
+				run, calls := fake(out, nil)
+				s, _ := ForOS(c.goos, home, run)
+				if _, err := s.Install(context.Background(), bin, "/a", nil); err != nil {
+					t.Fatal(err)
+				}
+				return *calls
+			}
+			if calls := install(true, "/b"); !c.restart(calls) {
+				t.Fatalf("a new unit must start: %v", calls)
+			}
+			calls := install(true, "/b")
+			if c.restart(calls) {
+				t.Fatalf("unchanged and running: no restart, got %v", calls)
+			}
+			if c.goos == "linux" && !slices.Contains(calls, "systemctl --user enable tgbridge") {
+				t.Fatalf("enable must still run: %v", calls)
+			}
+			if calls := install(false, "/b"); !c.restart(calls) {
+				t.Fatalf("unchanged but stopped: must start, got %v", calls)
+			}
+			if calls := install(true, "/moved/b"); !c.restart(calls) {
+				t.Fatalf("changed unit: must restart, got %v", calls)
+			}
+		})
 	}
 }
