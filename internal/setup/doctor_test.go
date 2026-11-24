@@ -64,7 +64,7 @@ func TestDoctorAllOK(t *testing.T) {
 	r.svc.installed, r.svc.active = true, true
 	cs := Doctor(context.Background(), r.env)
 	for _, c := range cs {
-		if c.Status != OK && !(c.Status == Info && c.Name == "version") {
+		if c.Status != OK && (c.Status != Info || c.Name != "version") {
 			t.Errorf("want all ok:\n%s", doctorText(cs))
 			break
 		}
