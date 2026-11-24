@@ -1,12 +1,15 @@
 package setup
 
 import (
+	"bytes"
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const label = "io.github.romcodedao.tgbridge"
@@ -28,9 +31,19 @@ func ForOS(goos, home string, run Runner) (Service, error) {
 	case "linux":
 		return systemd{home, run}, nil
 	case "darwin":
-		return launchd{home, os.Getuid(), run}, nil
+		return launchd{home, os.Getuid(), run, time.Sleep}, nil
 	}
 	return nil, fmt.Errorf("no service support on %s: run tgbridge inside WSL2", goos)
+}
+
+// pct escapes systemd specifiers.
+func pct(s string) string { return strings.ReplaceAll(s, "%", "%%") }
+
+// esc XML-escapes s.
+func esc(s string) string {
+	var b bytes.Buffer
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
 }
 
 // SystemdUnit renders the user unit.
@@ -40,10 +53,10 @@ Description=tgbridge - Claude Code over Telegram
 After=network-online.target
 
 [Service]
-ExecStart=` + bin + ` serve
+ExecStart="` + pct(bin) + `" serve
 Restart=on-failure
 RestartSec=5
-Environment=PATH=` + pathEnv + `
+Environment="PATH=` + pct(pathEnv) + `"
 
 [Install]
 WantedBy=default.target
@@ -55,12 +68,12 @@ func LaunchdPlist(bin, pathEnv, logPath string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
 <key>Label</key><string>` + label + `</string>
-<key>ProgramArguments</key><array><string>` + bin + `</string><string>serve</string></array>
+<key>ProgramArguments</key><array><string>` + esc(bin) + `</string><string>serve</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>` + pathEnv + `</string></dict>
-<key>StandardOutPath</key><string>` + logPath + `</string>
-<key>StandardErrorPath</key><string>` + logPath + `</string>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>` + esc(pathEnv) + `</string></dict>
+<key>StandardOutPath</key><string>` + esc(logPath) + `</string>
+<key>StandardErrorPath</key><string>` + esc(logPath) + `</string>
 </dict></plist>
 `
 }
@@ -68,10 +81,17 @@ func LaunchdPlist(bin, pathEnv, logPath string) string {
 // ServicePATH is claude's dir first, then the usual bin dirs, without duplicates.
 func ServicePATH(claudePath string) string {
 	h, _ := os.UserHomeDir()
+	dirs := []string{"/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"}
+	if h != "" {
+		dirs = append([]string{filepath.Join(h, ".local/bin")}, dirs...)
+	}
+	if claudePath != "" {
+		dirs = append([]string{filepath.Dir(claudePath)}, dirs...)
+	}
 	var out []string
 	seen := map[string]bool{}
-	for _, d := range []string{filepath.Dir(claudePath), filepath.Join(h, ".local/bin"), "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin"} {
-		if !seen[d] {
+	for _, d := range dirs {
+		if d != "" && d != "." && !seen[d] {
 			seen[d] = true
 			out = append(out, d)
 		}
@@ -126,7 +146,12 @@ func (s systemd) Install(ctx context.Context, bin, pathEnv string) error {
 	return nil
 }
 
-func (s systemd) Stop(ctx context.Context) error { return s.ctl(ctx, "stop", "tgbridge") }
+func (s systemd) Stop(ctx context.Context) error {
+	if !s.Installed() {
+		return nil
+	}
+	return s.ctl(ctx, "stop", "tgbridge")
+}
 
 func (s systemd) Uninstall(ctx context.Context) error {
 	_ = s.ctl(ctx, "disable", "--now", "tgbridge")
@@ -137,9 +162,10 @@ func (s systemd) Uninstall(ctx context.Context) error {
 }
 
 type launchd struct {
-	home string
-	uid  int
-	run  Runner
+	home  string
+	uid   int
+	run   Runner
+	sleep func(time.Duration)
 }
 
 func (l launchd) Name() string { return "launchd" }
@@ -163,7 +189,16 @@ func (l launchd) Install(ctx context.Context, bin, pathEnv string) error {
 		return err
 	}
 	_ = l.Stop(ctx) // not loaded yet is fine
-	_, err := l.run(ctx, "launchctl", "bootstrap", l.domain(), l.Path())
+	// bootout is asynchronous, so an early bootstrap can fail with an I/O error.
+	var err error
+	for i := 0; i < 5; i++ {
+		if i > 0 {
+			l.sleep(500 * time.Millisecond)
+		}
+		if _, err = l.run(ctx, "launchctl", "bootstrap", l.domain(), l.Path()); err == nil {
+			break
+		}
+	}
 	return err
 }
 

@@ -10,11 +10,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSystemdUnit(t *testing.T) {
 	u := SystemdUnit("/b/tgbridge", "/a:/b")
-	for _, w := range []string{"ExecStart=/b/tgbridge serve", "Environment=PATH=/a:/b", "WantedBy=default.target"} {
+	for _, w := range []string{`ExecStart="/b/tgbridge" serve`, `Environment="PATH=/a:/b"`, "WantedBy=default.target"} {
 		if !strings.Contains(u, w) {
 			t.Errorf("missing %q in\n%s", w, u)
 		}
@@ -134,5 +135,67 @@ func TestServicePATH(t *testing.T) {
 	// claude's dir already in the list: no duplicate.
 	if got, want := ServicePATH("/usr/bin/claude"), "/usr/bin:"+h+"/.local/bin:/usr/local/bin:/opt/homebrew/bin:/bin"; got != want {
 		t.Fatalf("%s != %s", got, want)
+	}
+}
+
+func TestLaunchdPlistEscapes(t *testing.T) {
+	bin := "/a&b/<tg>"
+	p := LaunchdPlist(bin, "/p&q:/x", "/l<og")
+	var v struct {
+		S []string `xml:"dict>array>string"`
+	}
+	if err := xml.Unmarshal([]byte(p), &v); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.S) != 2 || v.S[0] != bin {
+		t.Fatalf("%q", v.S)
+	}
+}
+
+func TestSystemdUnitQuotes(t *testing.T) {
+	u := SystemdUnit("/my dir/100%/tgbridge", "/a b:/c")
+	for _, w := range []string{`ExecStart="/my dir/100%%/tgbridge" serve`, `Environment="PATH=/a b:/c"`} {
+		if !strings.Contains(u, w) {
+			t.Errorf("missing %q in\n%s", w, u)
+		}
+	}
+}
+
+func TestLaunchdBootstrapRetry(t *testing.T) {
+	home := t.TempDir()
+	n, slept, always := 0, 0, false
+	run := func(_ context.Context, name string, args ...string) (string, error) {
+		if args[0] == "bootstrap" {
+			if n++; n == 1 || always {
+				return "", errors.New("Input/output error")
+			}
+		}
+		return "", nil
+	}
+	l := launchd{home, 501, run, func(time.Duration) { slept++ }}
+	if err := l.Install(context.Background(), "/b", "/a"); err != nil || n != 2 || slept != 1 {
+		t.Fatalf("%v %d %d", err, n, slept)
+	}
+	n, slept, always = 0, 0, true
+	if err := l.Install(context.Background(), "/b", "/a"); err == nil || slept != 4 {
+		t.Fatalf("%v %d", err, slept)
+	}
+}
+
+func TestSystemdStopNotInstalled(t *testing.T) {
+	run, calls := fake(nil, nil)
+	s, _ := ForOS("linux", t.TempDir(), run)
+	if err := s.Stop(context.Background()); err != nil || len(*calls) != 0 {
+		t.Fatalf("%v %v", err, *calls)
+	}
+}
+
+func TestServicePATHSkipsEmpty(t *testing.T) {
+	t.Setenv("HOME", "")
+	for _, c := range []string{"", "claude"} {
+		got := ServicePATH(c)
+		if got != "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin" {
+			t.Errorf("%q: %s", c, got)
+		}
 	}
 }
