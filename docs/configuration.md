@@ -8,7 +8,7 @@
 
 | Setting | Default | What it does |
 |---|---|---|
-| `owner_id` | *(required)* | Your Telegram user ID; only this account can use the bot. Find it with `tgbridge whoami` (or `/whoami` once the bot runs). |
+| `owner_id` | *(required)* | Your Telegram user ID; only this account can use the bot. `tgbridge init` sets it; or find it with `tgbridge whoami` (or `/whoami` once the bot runs). |
 | `token_file` | `~/.config/tgbridge/token` | Bot token file. It must be mode 600. Alternatively set `TGBRIDGE_TOKEN`. |
 | `default_cwd` | `~` | The folder new sessions start in (`/new <path>` overrides it) |
 | `model` | Claude Code's default | `claude --model` for Telegram sessions, for example `sonnet` |

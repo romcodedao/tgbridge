@@ -42,7 +42,7 @@ It downloads the release for your machine, checks its sha256, puts `tgbridge` in
 
 ```text
 Claude Code:
-  ok    claude        /home/you/.local/bin/claude 2.1.0
+  ok    claude        /home/you/.local/bin/claude 2.1.0 (Claude Code)
   ok    claude login  logged in (claude.ai)
 Wrote /home/you/.config/tgbridge/config.yaml
 Create a bot with @BotFather (/newbot) and paste its token here (input is hidden).

@@ -31,12 +31,12 @@ curl -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh
 |---|---|
 | Claude Code | Finds `claude` and checks you're logged in. A problem is reported, not fatal. |
 | Config | Creates `~/.config/tgbridge/config.yaml` (its folder is mode 700) from the example, if missing. |
-| Token | Checks the saved token with Telegram. If it's missing or rejected, asks for one (hidden input, three tries) and saves it mode 600. |
+| Token | Checks the saved token with Telegram. If it's missing or rejected, asks for one (hidden input, three tries) and saves it mode 600. A working `TGBRIDGE_TOKEN` is saved to the token file when that file is missing, because the service doesn't see your shell's environment. |
 | Owner | If `owner_id` is `0`, waits for a private message to the bot, shows the sender and asks `Is this you? [Y/n]`. A running service is stopped first, because it would hold the bot's updates (`409 Conflict`). |
-| Service | Installs and starts the systemd user unit or launchd agent. `--no-service` skips this. |
+| Service | Installs and starts the systemd user unit or launchd agent. A custom `TGBRIDGE_CONFIG` is written into it. If the existing file was edited by hand, it's copied to `<file>.bak` first. `--no-service` skips this, and so does a binary in the temp folder (`go run`). |
 | Summary | Runs `tgbridge doctor`. |
 
-Run `tgbridge init` again at any time: finished steps ask nothing and change nothing, except that the service file is rewritten with the current binary path.
+Run `tgbridge init` again at any time: finished steps ask nothing and change nothing, except that the service file is rewritten with the current binary path and the service is restarted. The restart ends any Claude turn that is running, so re-run it when the bot is idle.
 
 ## Release tarball by hand
 
@@ -99,7 +99,13 @@ There is no Windows binary. In a WSL2 distribution (Ubuntu, for example) with sy
 1. Install and log in to Claude Code inside WSL2, not on Windows.
 2. Run the installer inside WSL2.
 
-Without systemd in WSL2, `init` says there's no service manager. Run `tgbridge serve` yourself, or turn systemd on in `/etc/wsl.conf` (`[boot]` `systemd=true`) and restart WSL.
+Without systemd (no `/run/systemd/system`), `init` skips the service and prints `No service: systemd isn't running …` with the fix, `tgbridge doctor` shows it as a `warn  service` line, and `tgbridge service install` exits with the same message. To turn systemd on, run inside WSL2:
+
+```bash
+printf '[boot]\nsystemd=true\n' | sudo tee -a /etc/wsl.conf
+```
+
+then in Windows PowerShell `wsl --shutdown`, reopen the WSL2 terminal, and run `tgbridge service install`. Expected: `installed and started: /home/you/.config/systemd/user/tgbridge.service`. Or skip the service and run `tgbridge serve` yourself.
 
 ## Uninstall
 
