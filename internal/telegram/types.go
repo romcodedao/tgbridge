@@ -21,6 +21,7 @@ type ForumTopicCreated struct {
 }
 
 type Message struct {
+	Date              int64              `json:"date"`
 	MessageID         int                `json:"message_id"`
 	MessageThreadID   int                `json:"message_thread_id,omitempty"`
 	IsTopicMessage    bool               `json:"is_topic_message,omitempty"`

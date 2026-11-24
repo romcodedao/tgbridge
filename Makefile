@@ -1,5 +1,5 @@
 # tgbridge operations. Run from anywhere with:  make -s -C <repo> <target>
-# Suggested alias (see docs/operations.md):     alias tgb='make -s -C ~/projects/tgbridge'
+# Optional alias (see docs/operations.md):      alias tgb='make -s -C /path/to/tgbridge'
 
 SHELL   := /bin/bash
 BIN     ?= $(HOME)/.local/bin/tgbridge
@@ -30,7 +30,7 @@ errors: ## warnings and errors from the last 24 hours
 	@$(JC) --since -24h --no-pager | grep -iE 'error|warn|fail|rejected|panic' || echo "no errors in the last 24h"
 
 start: ## start the service
-	@$(SC) start $(UNIT) && $(SC) is-active $(UNIT)
+	@$(SC) start $(UNIT) && sleep 3 && $(SC) is-active $(UNIT) || { echo "not running: make logs-recent shows why"; exit 1; }
 
 stop: ## stop the service (Claude sessions end; conversations are kept)
 	@$(SC) stop $(UNIT) && echo stopped
@@ -52,15 +52,19 @@ deploy: build restart ## build from this checkout and restart
 update: ## pull main, test, build and restart
 	@git -C $(CURDIR) pull --ff-only && $(MAKE) -s test && $(MAKE) -s deploy
 
-setup: build ## first-time install: config folder, systemd unit, service on
+setup: build ## first-time install: config folder, systemd unit; starts the service once owner_id is set (run it again after setting it)
 	@mkdir -p $(CONF) $(UNITDIR) && chmod 700 $(CONF)
-	@test -f $(CONF)/config.yaml || { cp config.example.yaml $(CONF)/config.yaml && chmod 600 $(CONF)/config.yaml && echo "created $(CONF)/config.yaml: set owner_id"; }
-	@test -f $(CONF)/token || echo "missing $(CONF)/token: see README step 2"
-	@cp deploy/tgbridge.service $(UNITDIR)/ && $(SC) daemon-reload && $(SC) enable --now $(UNIT)
+	@test -f $(CONF)/config.yaml || { cp config.example.yaml $(CONF)/config.yaml && chmod 600 $(CONF)/config.yaml && echo "created $(CONF)/config.yaml"; }
+	@test -f $(CONF)/token || { echo "missing $(CONF)/token: see README step 2"; exit 1; }
+	@cp deploy/tgbridge.service $(UNITDIR)/ && $(SC) daemon-reload
 	@loginctl enable-linger $(USER) 2>/dev/null || echo "run: sudo loginctl enable-linger $(USER)  (keeps it running when you log out)"
-	@$(SC) is-active $(UNIT)
+	@if grep -qE '^owner_id:[[:space:]]*"?[1-9]' $(CONF)/config.yaml; then \
+	  $(SC) enable $(UNIT) && $(MAKE) -s start; \
+	else \
+	  echo "owner_id not set. Run: $(BIN) whoami   then put owner_id in $(CONF)/config.yaml and run make setup again"; \
+	fi
 
-hooks: ## enable Orca handoff: hooks + MCP server in ~/.claude (backup kept)
+hooks: ## optional: Claude Code hooks + MCP server in ~/.claude for telegram_send and Orca handoff (backup kept)
 	@$(BIN) install
 
 unhooks: ## remove the handoff hooks + MCP server from ~/.claude
@@ -74,8 +78,10 @@ doctor: ## check everything tgbridge needs
 	[ -f $(CONF)/config.yaml ] && ok "config $(CONF)/config.yaml" || bad "no config (tgb setup)"; \
 	[ "$$(stat -c %a $(CONF)/token 2>/dev/null)" = 600 ] && ok "token file mode 600" || bad "token missing or not chmod 600"; \
 	command -v claude >/dev/null && ok "claude $$(claude --version 2>/dev/null | head -1)" || bad "claude not on PATH"; \
-	O=$$(grep -E '^orca_cli:' $(CONF)/config.yaml 2>/dev/null | awk '{print $$2}'); O=$${O:-$$HOME/.config/orca/cli/bin/orca}; O=$${O/#\~/$$HOME}; \
-	[ -x "$$O" ] && ok "orca cli $$O" || bad "orca cli not found ($$O); /sessions and handoff need it"; \
+	if grep -qE '^orca_enabled:[[:space:]]*true' $(CONF)/config.yaml 2>/dev/null; then \
+	  O=$$(grep -E '^orca_cli:' $(CONF)/config.yaml | awk '{print $$2}'); O=$${O:-$$HOME/.config/orca/cli/bin/orca}; O=$${O/#\~/$$HOME}; \
+	  [ -x "$$O" ] && ok "orca cli $$O" || bad "orca cli not found ($$O); orca_enabled needs it"; \
+	else echo "  info  Orca integration off (optional, orca_enabled)"; fi; \
 	[ -S "$${XDG_RUNTIME_DIR:-/run/user/$$(id -u)}/tgbridge.sock" ] && ok "socket present" || bad "socket missing (service down?)"; \
 	$(JC) -n 50 --no-pager | grep -q 'Threaded Mode is off' && bad "Threaded Mode off in BotFather" || ok "no Threaded Mode warning"; \
 	grep -q 'tgbridge hook' $(HOME)/.claude/settings.json 2>/dev/null && ok "handoff hooks installed" || echo "  info  handoff hooks not installed (tgb hooks)"

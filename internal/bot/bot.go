@@ -399,6 +399,9 @@ func (b *Bot) HandleIPC(ctx context.Context, r ipc.Request) ipc.Response {
 			if r.Op == "status" {
 				return ipc.Response{Text: "not handed off"}
 			}
+			if r.Op == "handoff" { // the MCP tool must not report success for nothing
+				return ipc.Response{Error: orcaOff}
+			}
 			return ipc.Response{}
 		}
 		return b.hand.Handle(ctx, r)

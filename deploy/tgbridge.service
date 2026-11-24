@@ -6,7 +6,7 @@ After=network-online.target
 ExecStart=%h/.local/bin/tgbridge serve
 Restart=on-failure
 RestartSec=5
-# claude and orca must be on PATH
+# claude must be on PATH (orca only with orca_enabled)
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]

@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -30,6 +32,7 @@ var version = "dev"
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: tgbridge <command>
   serve               run the bridge (config: $TGBRIDGE_CONFIG or ~/.config/tgbridge/config.yaml)
+  whoami              wait for a message to the bot and print the sender's user ID (for owner_id)
   install             register hooks and the MCP server with Claude Code
   uninstall           remove them
   mcp                 stdio MCP server (started by Claude)
@@ -89,6 +92,10 @@ func main() {
 		if err := serve(); err != nil {
 			log.Fatal(err)
 		}
+	case "whoami":
+		if err := whoami(); err != nil {
+			log.Fatal(err)
+		}
 	case "mcp":
 		sock := socketPath()
 		mcp.ServeContext(os.Stdin, os.Stdout, func(ctx context.Context, r ipc.Request) (ipc.Response, error) { return ipc.Call(ctx, sock, r) })
@@ -121,6 +128,58 @@ func main() {
 	}
 }
 
+// whoami runs before owner_id is set, so it reads the config without that check.
+// The service must be stopped: two getUpdates callers on one token conflict.
+func whoami() error {
+	cfg, err := config.Read(configPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		cfg, err = config.Defaults(), nil
+	}
+	if err != nil {
+		return err
+	}
+	token, err := cfg.Token()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	tg := telegram.New(token, "")
+	me, err := tg.GetMe(ctx)
+	if err != nil {
+		return fmt.Errorf("getMe: %w (check the token)", err)
+	}
+	since := time.Now().Add(-time.Minute) // clock skew margin; older queued messages are ignored
+	fmt.Printf("Send any message to @%s now, in a private chat (Ctrl+C to cancel)...\n", me.Username)
+	u, err := tg.FirstSender(ctx, since)
+	if err != nil {
+		return whoamiErr(err)
+	}
+	name := u.FirstName
+	if u.Username != "" {
+		name += " (@" + u.Username + ")"
+	}
+	fmt.Printf("Message from %s, user ID %d. Check this is you: this account will control Claude on this machine.\nPut this line in %s:\nowner_id: %d\n", name, u.ID, configPath(), u.ID)
+	return nil
+}
+
+// whoamiErr explains 409 Conflict: another getUpdates caller (the running service) or a webhook owns the token.
+func whoamiErr(err error) error {
+	var ae *telegram.APIError
+	if errors.As(err, &ae) && ae.Code == 409 {
+		return fmt.Errorf("%w\nThe bot is already being read elsewhere. Stop the service first: systemctl --user stop tgbridge\n(or, if a webhook is set: curl https://api.telegram.org/bot<token>/deleteWebhook)", err)
+	}
+	return err
+}
+
+// orcaFor returns the Orca CLI only when the integration is on; nil means serve never calls Orca.
+func orcaFor(cfg *config.Config) *orca.CLI {
+	if !cfg.OrcaEnabled {
+		return nil
+	}
+	return orca.New(cfg.OrcaCLI)
+}
+
 func serve() error {
 	cfg, err := config.Load(configPath())
 	if err != nil {
@@ -151,12 +210,19 @@ func serve() error {
 		return err
 	}
 	mgr := engine.NewManager(engine.ManagerConfig{MaxLive: cfg.Engine.MaxLive, IdleTimeout: cfg.Engine.IdleTimeout}, engine.Start)
-	oc := orca.New(cfg.OrcaCLI)
-	b := bot.New(bot.Deps{Cfg: cfg, TG: tg, Mgr: mgr, Store: st, Audit: store.Audit(cfg.StateDir), Orca: oc, BotUsername: me.Username, SelfBin: self()})
-	home, _ := os.UserHomeDir()
-	h := handoff.New(handoff.Deps{TG: tg, Store: st, Orca: oc, Ask: b.Ask, Owner: cfg.OwnerID, ClaudeHome: filepath.Join(home, ".claude"),
-		PermTimeout: cfg.HandoffPermissionTimeout, BotUser: me.Username, UploadsDir: cfg.Uploads.Dir})
-	b.SetHandoff(h)
+	deps := bot.Deps{Cfg: cfg, TG: tg, Mgr: mgr, Store: st, Audit: store.Audit(cfg.StateDir), BotUsername: me.Username, SelfBin: self()}
+	oc := orcaFor(cfg)
+	if oc != nil {
+		deps.Orca = oc // set only when enabled: a nil *orca.CLI in the interface would look enabled to the bot
+	}
+	b := bot.New(deps)
+	if oc != nil {
+		home, _ := os.UserHomeDir()
+		h := handoff.New(handoff.Deps{TG: tg, Store: st, Orca: oc, Ask: b.Ask, Owner: cfg.OwnerID, ClaudeHome: filepath.Join(home, ".claude"),
+			PermTimeout: cfg.HandoffPermissionTimeout, BotUser: me.Username, UploadsDir: cfg.Uploads.Dir})
+		b.SetHandoff(h)
+		h.Start(ctx)
+	}
 
 	go func() {
 		if err := ipc.Serve(ctx, cfg.SocketPath, b.HandleIPC); err != nil && ctx.Err() == nil {
@@ -164,7 +230,6 @@ func serve() error {
 			stop()
 		}
 	}()
-	h.Start(ctx)
 	go b.Run(ctx)
 	log.Printf("tgbridge %s serving @%s for owner %d", version, me.Username, cfg.OwnerID)
 	b.Updates(ctx, telegram.NewPoller(tg, 50))

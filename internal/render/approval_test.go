@@ -16,8 +16,8 @@ func TestApprovalDetailReadable(t *testing.T) {
 }
 
 func TestApprovalDetailFlagsHiddenCharacters(t *testing.T) {
-	d, warn, _ := ApprovalDetail("Bash", json.RawMessage(`{"command":"rm -rf /tmp/a‮/b"}`))
-	if !warn || strings.ContainsRune(d, '‮') || !strings.Contains(d, "U+202E") {
+	d, warn, _ := ApprovalDetail("Bash", json.RawMessage("{\"command\":\"rm -rf /tmp/a\u202e/b\"}"))
+	if !warn || strings.ContainsRune(d, '\u202e') || !strings.Contains(d, "U+202E") {
 		t.Fatalf("detail=%q warn=%v", d, warn)
 	}
 }
@@ -72,7 +72,7 @@ func TestApprovalDetailStillFlags(t *testing.T) {
 		"Phoenician RTL":              "\U00010900 1",
 		"zalgo marks":                 "á́́́́",
 		"mark after space":            "a ́b",
-		"ZWJ between letters":         "ab‍cd",
+		"ZWJ between letters":         "ab\u200dcd",
 		"VS16 after letter":           "a️",
 		"Tifinagh joiner after Latin": "a\u2D7Fb",
 		"Khitan filler after Latin":   "a\U00016FE4b",

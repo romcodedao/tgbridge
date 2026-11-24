@@ -1,4 +1,14 @@
-# Moving to another machine
+# Upgrading and moving
+
+## Upgrade notes
+
+Read these before `make update` (it runs `git pull --ff-only`) when you come from a version before the open-source release:
+
+- **Back up `docs/plans/` first.** It is no longer tracked, so pulling deletes the copy in your checkout: `cp -a docs/plans ~/tgbridge-plans-backup` in the checkout, then copy it back after the update. New files there stay untracked (it's in `.gitignore`).
+- **Orca is now opt-in.** If you use `/sessions` with Orca agents or handoff, add `orca_enabled: true` to `~/.config/tgbridge/config.yaml`, then restart. Without it, Orca agents disappear from `/sessions` and handoff stops; handoff topics left open show a hint to `/close` them.
+- **`owner_id` is found with `tgbridge whoami`** before the service runs. Existing configs need no change.
+
+## Moving to another machine
 
 **What moves:** the config, the token and tgbridge's state. **What gets rebuilt:** the binary, the service and the hooks.
 
@@ -6,7 +16,7 @@
 
 **Run only one at a time.** Two machines polling the same bot token fight each other (`409 Conflict` in the log), so stop the old one first.
 
-## 1. On the old machine
+### 1. On the old machine
 
 ```bash
 tgb stop && tgb backup
@@ -18,7 +28,7 @@ Optional, to keep conversations resumable: `tar czf ~/claude-projects.tgz -C ~ .
 
 Copy the archive(s) to the new machine, for example: `scp ~/tgbridge-backup-*.tgz newhost:~/`.
 
-## 2. On the new machine: prerequisites
+### 2. On the new machine: prerequisites
 
 | Needed | Check | Expected |
 |---|---|---|
@@ -26,31 +36,31 @@ Copy the archive(s) to the new machine, for example: `scp ~/tgbridge-backup-*.tg
 | Go 1.27+ | `go version` | `go1.27` or newer |
 | make, git | `make --version; git --version` | versions print |
 | Claude Code, logged in | `claude --version`, then run `claude` once to log in | a version; a working session |
-| Orca (optional) | `~/.config/orca/cli/bin/orca status --json` | `"ok": true` |
+| Orca (only with `orca_enabled`) | `~/.config/orca/cli/bin/orca status --json` | `"ok": true` |
 | Tools Claude should use (kubectl, gh, …) and their configs (`~/.kube`, gh auth) | `kubectl config get-contexts` | your contexts |
 
-## 3. On the new machine: install
+### 3. On the new machine: install
 
 ```bash
 git clone https://github.com/romcodedao/tgbridge ~/projects/tgbridge
 cd ~ && tar xzf ~/tgbridge-backup-*.tgz            # restores ~/.config/tgbridge and ~/.local/state/tgbridge
 # optional: cd ~ && tar xzf ~/claude-projects.tgz
 cd ~/projects/tgbridge && make setup
-echo "alias tgb='make -s -C ~/projects/tgbridge'" >> ~/.bashrc && source ~/.bashrc
+echo "alias tgb='make -s -C ~/projects/tgbridge'" >> ~/.bashrc && source ~/.bashrc   # optional shortcut
 tgb doctor
 ```
 
-Expected: `make setup` ends with `active`; `tgb doctor` shows `ok` lines.
+Expected: `make setup` ends with `active` (the restored config already has `owner_id`); `tgb doctor` shows `ok` lines.
 
 - **Config paths:** if the username or home path changed, edit `~/.config/tgbridge/config.yaml` (`default_cwd`, `orca_cli`) and run `tgb restart`. Paths written with `~` need no change.
 - **Linger:** if `doctor` reports it off, run `sudo loginctl enable-linger $USER`.
-- **Handoff:** `tgb hooks`, then start new Orca Claude sessions.
+- **Handoff (Orca only):** `tgb hooks`, then start new Orca Claude sessions.
 
-## 4. Check from the phone
+### 4. Check from the phone
 
-Send `/sessions` to the bot. You should see your old topics, and Orca agents if Orca runs there. Then send a message in General: a new topic opens and Claude answers.
+Send `/sessions` to the bot. You should see your old topics, and Orca agents if `orca_enabled` is on. Then send a message in General: a new topic opens and Claude answers.
 
-## 5. Clean up the old machine
+### 5. Clean up the old machine
 
 ```bash
 tgb uninstall

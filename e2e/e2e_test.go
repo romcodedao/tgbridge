@@ -1,6 +1,6 @@
 //go:build e2e
 
-// End-to-end checks against the real Telegram bot, real `claude` (haiku) and real Orca.
+// End-to-end checks against the real Telegram bot, real `claude` (haiku) and, if installed, real Orca.
 // Needs ~/.config/tgbridge/token and TGBRIDGE_E2E_OWNER (Telegram user id). Messages appear in the owner's chat.
 package e2e
 
@@ -110,7 +110,7 @@ func newRig(t *testing.T) *rig {
 	cfg.StateDir, cfg.SocketPath = filepath.Join(dir, "state"), filepath.Join(dir, "s.sock")
 	cfg.DefaultCwd = filepath.Join(dir, "work")
 	os.MkdirAll(cfg.DefaultCwd, 0o700)
-	cfg.OrcaCLI = filepath.Join(home, ".config", "orca", "cli", "bin", "orca")
+	cfg.OrcaCLI, cfg.OrcaEnabled = filepath.Join(home, ".config", "orca", "cli", "bin", "orca"), true
 	token, err := cfg.Token()
 	if err != nil {
 		t.Fatal(err)
@@ -250,6 +250,9 @@ func orcaJSON(t *testing.T, bin string, args ...string) map[string]any {
 
 func TestHandoffRealOrca(t *testing.T) {
 	r := newRig(t)
+	if _, err := os.Stat(r.cfg.OrcaCLI); err != nil {
+		t.Skip("Orca not installed (optional)")
+	}
 	ctx := context.Background()
 	root, _ := filepath.Abs("..")
 	dir := filepath.Dir(r.sock)

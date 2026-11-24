@@ -13,28 +13,46 @@ import (
 	"github.com/romcodedao/tgbridge/internal/telegram"
 )
 
-const helpText = `<b>tgbridge</b> — Claude Code from Telegram
+const helpBase = `<b>tgbridge</b> — Claude Code from Telegram
 Send any message in General to start a new session (one topic each). Messages in a topic continue it.
 
 /new [path] &lt;task&gt; — new session (optionally in a folder)
-/sessions — list sessions and Orca agents
-/status &lt;orca-session&gt; — last messages of an Orca agent
+/sessions — list sessions
 /stop — interrupt the running turn
 /reset or /clear — fresh conversation in this topic
 /mode ask|auto|full — how much Claude may do without asking (this topic)
 /compact — shrink this conversation's context
 /close or /exit — end this session
-/handoff off — stop forwarding a handed-off Orca session
 /whoami — your Telegram user ID`
+
+const helpOrca = `
+
+<b>Orca</b> (orca_enabled)
+/sessions also lists Orca agents, with 📲 Hand off buttons
+/status &lt;orca-session&gt; — last messages of an Orca agent
+/handoff off — stop forwarding a handed-off Orca session`
+
+const orcaOff = "The Orca integration is off (orca_enabled in config.yaml)."
+
+func (b *Bot) helpText() string {
+	if b.cfg.OrcaEnabled {
+		return helpBase + helpOrca
+	}
+	return helpBase
+}
 
 // command handles a slash command; false means "not ours, send it to Claude".
 func (b *Bot) command(ctx context.Context, m *telegram.Message, cmd, arg string) bool {
 	thread := m.MessageThreadID
+	if (cmd == "/status" || cmd == "/handoff") && b.orca == nil {
+		b.reply(ctx, b.chat(), thread, orcaOff)
+		return true
+	}
 	switch cmd {
 	case "/whoami":
 		b.reply(ctx, b.chat(), thread, fmt.Sprintf("Your user ID: %d (owner)", m.From.ID))
 	case "/start", "/help":
-		b.replyHTML(ctx, thread, helpText, nil)
+		b.replyHTML(ctx, thread, b.helpText(), nil)
 	case "/new":
 		cwd, task := b.cfg.DefaultCwd, arg
 		if first, rest, _ := strings.Cut(arg, " "); first != "" {
@@ -181,7 +199,7 @@ func (b *Bot) topicLink(thread int) string {
 func (b *Bot) sessions(ctx context.Context, thread int) {
 	var sb strings.Builder
 	sb.WriteString("<b>Telegram sessions</b>\n")
-	n := 0
+	n, stale := 0, false
 	for _, tp := range b.st.Topics() {
 		if tp.Closed {
 			continue
@@ -195,11 +213,17 @@ func (b *Bot) sessions(ctx context.Context, thread int) {
 		}
 		if tp.Kind == store.KindHandoff {
 			state = "handed off"
+			if b.hand == nil {
+				state, stale = "handoff, Orca off", true
+			}
 		}
 		fmt.Fprintf(&sb, "• <a href=\"%s\">%s</a> — %s, ctx %dk, %s ago\n", b.topicLink(tp.ThreadID), esc(tp.Title), state, tp.ContextTokens/1000, time.Since(tp.LastActive).Round(time.Minute))
 	}
 	if n == 0 {
 		sb.WriteString("none\n")
+	}
+	if stale {
+		sb.WriteString("Handoff topics can't be used while the Orca integration is off: send /close in them.\n")
 	}
 	var rows [][]telegram.InlineButton
 	if b.orca != nil {

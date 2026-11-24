@@ -9,12 +9,10 @@
 All day-to-day commands are `make` targets in the repo's [`Makefile`](../Makefile). The alias runs them from any folder:
 
 ```bash
-alias tgb='make -s -C ~/projects/tgbridge'     # in ~/.bashrc; adjust the path to where the repo lives
+alias tgb='make -s -C ~/projects/tgbridge'     # optional, in ~/.bashrc; use the path of your checkout
 ```
 
-Without the alias, use `make -s -C ~/projects/tgbridge <target>`, or `make <target>` inside the repo.
-
-**Moving an existing install to this checkout** (for example, one built from an Orca worktree): clone to `~/projects/tgbridge`, point the alias there, then run `tgb deploy`. It rebuilds `~/.local/bin/tgbridge` from the checkout and restarts the service; config, token and state stay where they are.
+Without the alias, use `make -s -C <checkout> <target>`, or `make <target>` inside the repo. The examples below use `tgb`.
 
 | Command | What it does | Raw equivalent |
 |---|---|---|
@@ -30,8 +28,8 @@ Without the alias, use `make -s -C ~/projects/tgbridge <target>`, or `make <targ
 | `tgb deploy` | Build, then restart | |
 | `tgb update` | `git pull --ff-only`, run tests, build, restart | |
 | `tgb test` | Unit tests | `go test -race ./...` |
-| `tgb setup` | First install: config folder, systemd unit, linger, start | |
-| `tgb hooks` / `unhooks` | Add or remove Orca handoff hooks and the MCP server in `~/.claude/settings.json` (a backup is kept) | `tgbridge install` / `uninstall` |
+| `tgb setup` | First install: config folder, systemd unit, linger; starts the service once `owner_id` is set (run it again after `tgbridge whoami`) | |
+| `tgb hooks` / `unhooks` | Optional: add or remove the Claude Code hooks (Orca handoff) and the MCP server (`telegram_send`) in `~/.claude/settings.json` (a backup is kept) | `tgbridge install` / `uninstall` |
 | `tgb backup` | Archive config, token and state to `~/tgbridge-backup-<date>.tgz` (mode 600) | |
 | `tgb uninstall` | Remove the service and hooks; config and state are kept | |
 
@@ -63,8 +61,8 @@ Without the alias, use `make -s -C ~/projects/tgbridge <target>`, or `make <targ
 | Every command gets denied / "unknown session" | Fixed in v1 (permissions are tied to the topic). Make sure you run the latest version: `tgb update`. |
 | `⚠️ The Claude session crashed` | Send your message again; the conversation resumes. Repeated crashes: `tgb errors`. Check memory with `free -h`. |
 | Claude says it's not logged in | Run `claude` once in a terminal on the machine and log in, then `tgb restart`. |
-| `/sessions` shows `orca:` errors | Orca isn't running, or `orca_cli` is wrong. `tgb doctor` shows the path it uses. |
-| Handoff does nothing | `tgb hooks`, then start a **new** Orca Claude session. Existing ones don't load the hooks. |
+| `/sessions` shows `orca:` errors | Orca isn't running, or `orca_cli` is wrong (only with `orca_enabled: true`). `tgb doctor` shows the path it uses. |
+| Handoff does nothing | Check `orca_enabled: true`, run `tgb hooks`, then start a **new** Orca Claude session. Existing ones don't load the hooks. |
 | Service won't start after a config edit | `tgb logs-recent` shows the config error (for example `owner_id is required`). |
 
 ## Limiting memory (optional)

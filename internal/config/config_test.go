@@ -119,3 +119,27 @@ func TestUploadsLimitsMustBePositive(t *testing.T) {
 		}
 	}
 }
+
+func TestOrcaOffByDefault(t *testing.T) {
+	c, err := Load(write(t, "owner_id: 1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OrcaEnabled {
+		t.Fatal("Orca integration must be opt-in")
+	}
+	c, err = Load(write(t, "owner_id: 1\norca_enabled: true\n"))
+	if err != nil || !c.OrcaEnabled {
+		t.Fatalf("orca_enabled: true not parsed: %v", err)
+	}
+}
+
+func TestExampleConfigNeedsOwnerAndPointsToWhoami(t *testing.T) {
+	c, err := Read("../../config.example.yaml")
+	if err != nil || c.OwnerID != 0 || c.TokenFile == "" {
+		t.Fatalf("whoami must be able to read the example config: %+v, %v", c, err)
+	}
+	if _, err := Load("../../config.example.yaml"); err == nil || !strings.Contains(err.Error(), "tgbridge whoami") {
+		t.Fatalf("Load must point to tgbridge whoami, got %v", err)
+	}
+}

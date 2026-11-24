@@ -23,14 +23,14 @@
 | *(message in General)* | New session in a new topic |
 | *(message in a topic)* | Continue that session |
 | `/new [path] <task>` | New session, optionally in a folder (`/new ~/src/app fix the build`) |
-| `/sessions` | Telegram sessions and Orca agents, with 📲 Hand off buttons |
-| `/status <orca-session-id>` | Last messages of an Orca agent |
+| `/sessions` | Telegram sessions (and, with Orca on, Orca agents with 📲 Hand off buttons) |
+| `/status <orca-session-id>` | Orca only: last messages of an Orca agent |
 | `/stop` | Interrupt the running turn (same as the ⏹ button) |
 | `/reset`, `/clear` | Fresh conversation in this topic |
 | `/compact` | Shrink this conversation's context (only when Claude is idle) |
 | `/mode ask\|auto\|full` | How much Claude may do without asking, for this topic |
 | `/close`, `/exit` | End this session; the topic is renamed 🔒 |
-| `/handoff off` | Stop forwarding a handed-off Orca session |
+| `/handoff off` | Orca only: stop forwarding a handed-off Orca session |
 | `/whoami` | Your Telegram user ID |
 | `/help` | This list |
 
@@ -40,7 +40,7 @@ Any other `/command` is sent to Claude as a message. Skill commands work. Menu-s
 
 | Mode | What asks you on Telegram |
 |---|---|
-| `ask` | Everything except read-only tools (Read, Grep, Glob, `git status`, `ls`, read-only `orca` status commands) |
+| `ask` | Everything except read-only tools (Read, Grep, Glob, `git status`, `ls`, and with Orca on, read-only `orca` status commands) |
 | `auto` | Only what Claude Code's auto mode considers risky |
 | `full` | Nothing (`bypassPermissions`) |
 
@@ -51,9 +51,13 @@ Any other `/command` is sent to Claude as a message. Skill commands work. Menu-s
   - An unanswered prompt is denied after `engine.permission_timeout` (10 min).
   - A ⚠️ on a prompt means it contains hidden or right-to-left characters. Read it carefully.
 
-## Handing off an Orca session
+## Optional: Orca integration
 
-Needs `tgb hooks` once, then a **new** Orca Claude session.
+Orca is a multi-agent IDE. tgbridge works without it. If you use Orca, set `orca_enabled: true` in the config and restart: `/sessions` then lists Orca agents, `/status` reads one, and you can hand a running Orca Claude session off to Telegram.
+
+### Handing off an Orca session
+
+Needs `orca_enabled: true`, `make hooks` once, then a **new** Orca Claude session.
 
 1. Inside the Orca session, say **"notify me on Telegram"**, or tap 📲 in `/sessions`. A 📲 topic opens.
 2. Claude's output appears in that topic. What you type there goes into the terminal when Claude is idle; while it works, your message is queued.

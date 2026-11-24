@@ -35,6 +35,7 @@ type Config struct {
 	TokenFile                string        `yaml:"token_file"`
 	OwnerID                  int64         `yaml:"owner_id"`
 	DefaultCwd               string        `yaml:"default_cwd"`
+	OrcaEnabled              bool          `yaml:"orca_enabled"` // optional Orca integration: /sessions agents, /status, handoff
 	OrcaCLI                  string        `yaml:"orca_cli"`
 	ClaudeBin                string        `yaml:"claude_bin"`
 	Model                    string        `yaml:"model"`
@@ -82,8 +83,20 @@ func Defaults() *Config {
 	}
 }
 
-// Load reads the YAML file at path over the defaults.
+// Load reads the YAML file at path over the defaults and requires owner_id.
 func Load(path string) (*Config, error) {
+	c, err := Read(path)
+	if err != nil {
+		return nil, err
+	}
+	if c.OwnerID == 0 {
+		return nil, errors.New("config: owner_id is required (run `tgbridge whoami` to find it)")
+	}
+	return c, nil
+}
+
+// Read is Load without the owner_id check, for `tgbridge whoami`.
+func Read(path string) (*Config, error) {
 	c := Defaults()
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -100,9 +113,6 @@ func Load(path string) (*Config, error) {
 	}
 	if c.Uploads.MaxAge <= 0 || c.Uploads.MaxTotalMB <= 0 {
 		return nil, fmt.Errorf("config: uploads.max_age and uploads.max_total_mb must be positive (got %v, %d)", c.Uploads.MaxAge, c.Uploads.MaxTotalMB)
-	}
-	if c.OwnerID == 0 {
-		return nil, errors.New("config: owner_id is required (send /whoami to the bot to find it)")
 	}
 	if c.OrcaCLI == "" {
 		c.OrcaCLI = os.Getenv("ORCA_CLI_COMMAND")

@@ -1,8 +1,11 @@
 # ~/.config/tgbridge/config.yaml
-owner_id: 0                 # your Telegram user ID (send /whoami to the bot)
+owner_id: 0                 # your Telegram user ID (required; run `tgbridge whoami` to find it)
 token_file: ~/.config/tgbridge/token   # chmod 600; or set TGBRIDGE_TOKEN
 default_cwd: ~/              # folder new sessions start in
 # model: sonnet             # claude --model for Telegram sessions (default: your Claude Code default)
+
+# Optional Orca integration (Orca agents in /sessions, /status, handoff). Off by default.
+# orca_enabled: true
 # orca_cli: ~/.config/orca/cli/bin/orca
 
 engine:
@@ -17,7 +20,7 @@ context:
   hard_limit: 150000        # automatic fresh start with a summary
 
 draft_interval: 700ms       # streaming draft refresh
-handoff_permission_timeout: 10m   # then the prompt falls back to the Orca terminal
+handoff_permission_timeout: 10m   # Orca only: then the prompt falls back to the Orca terminal
 rate_limit_per_min: 30
 
 uploads:                  # photos and files you send (Claude reads them from here)

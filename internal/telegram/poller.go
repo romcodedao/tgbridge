@@ -47,3 +47,24 @@ func (p *Poller) Updates(ctx context.Context) <-chan Update {
 	}()
 	return ch
 }
+
+// FirstSender waits for a private message from a person sent at or after since, and returns its
+// sender. Groups, bots and older queued messages are skipped, so a stranger's earlier message
+// can't become owner_id. It confirms the update, so a later serve doesn't handle it again.
+// Used by `tgbridge whoami` before owner_id is set.
+func (c *Client) FirstSender(ctx context.Context, since time.Time) (*User, error) {
+	offset := 0
+	for {
+		var ups []Update
+		if err := c.Call(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": 50, "allowed_updates": []string{"message"}}, &ups); err != nil {
+			return nil, err
+		}
+		for _, u := range ups {
+			offset = u.UpdateID + 1
+			if m := u.Message; m != nil && m.From != nil && !m.From.IsBot && m.Chat.Type == "private" && m.Date >= since.Unix() {
+				c.Call(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": 0}, nil)
+				return m.From, nil
+			}
+		}
+	}
+}

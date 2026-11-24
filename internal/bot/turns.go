@@ -74,7 +74,7 @@ func (b *Bot) spec(thread int) engine.Spec {
 	if cwd == "" {
 		cwd = b.cfg.DefaultCwd
 	}
-	args := append(engine.BuildArgs(b.cfg, b.settingsPath, tp.ClaudeSessionID, systemPrompt), "--mcp-config", b.mcpConfigFor(thread))
+	args := append(engine.BuildArgs(b.cfg, b.settingsPath, tp.ClaudeSessionID, b.prompt()), "--mcp-config", b.mcpConfigFor(thread))
 	if m := config.PermissionModes[b.mode(tp)]; m != "" {
 		args = append(args, "--permission-mode", m)
 	}

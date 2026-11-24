@@ -534,7 +534,7 @@ func TestSessionGrantForOtherToolsIsExactInput(t *testing.T) {
 }
 
 func TestOrcaAllowRulesAreExact(t *testing.T) {
-	h := newHarness(t, func(c *config.Config) { c.OrcaCLI = "/o/orca" })
+	h := newHarness(t, func(c *config.Config) { c.OrcaCLI, c.OrcaEnabled = "/o/orca", true })
 	b, _ := json.Marshal(h.b.engineSettings())
 	o := h.b.cfg.OrcaCLI
 	if strings.Contains(string(b), o+" agent read") || strings.Contains(string(b), o+" agent list:*") || strings.Contains(string(b), o+" status:*") {
@@ -682,5 +682,55 @@ func TestDownloadErrorReplies(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if h.tg.textContains("echo:") || len(h.tg.find("sendMessageDraft")) > 0 {
 		t.Fatalf("submitted after a failed download: %v", h.tg.methods())
+	}
+}
+
+func TestOrcaHiddenWhenDisabled(t *testing.T) {
+	h := newHarness(t, nil)
+	if strings.Contains(h.b.helpText(), "Orca") || strings.Contains(h.b.helpText(), "/handoff") || strings.Contains(h.b.prompt(), "Orca") {
+		t.Fatalf("Orca shown while disabled:\n%s\n%s", h.b.helpText(), h.b.prompt())
+	}
+	if b, _ := json.Marshal(h.b.engineSettings()); strings.Contains(string(b), "agent list --json") {
+		t.Fatalf("orca allow rules while disabled: %s", b)
+	}
+	h.b.HandleUpdate(bg, msg(0, owner, "/sessions"))
+	eventually(t, func() bool { return h.tg.textContains("Telegram sessions") })
+	if h.tg.textContains("Orca") {
+		t.Fatal("/sessions mentions Orca while disabled")
+	}
+	if r := h.b.HandleIPC(bg, ipc.Request{Op: "handoff"}); !strings.Contains(r.Error, "orca_enabled") {
+		t.Fatalf("telegram_handoff without Orca must fail clearly, got %+v", r)
+	}
+	if r := h.b.HandleIPC(bg, ipc.Request{Op: "hook.Stop"}); r.Error != "" {
+		t.Fatalf("hooks without Orca must stay silent: %v", r.Error)
+	}
+	h.b.HandleUpdate(bg, msg(0, owner, "/status abc"))
+	eventually(t, func() bool { return h.tg.textContains("orca_enabled") })
+}
+
+func TestOrcaShownWhenEnabled(t *testing.T) {
+	h := newHarness(t, func(c *config.Config) { c.OrcaEnabled = true })
+	if !strings.Contains(h.b.helpText(), "/handoff") || !strings.Contains(h.b.prompt(), "Orca") {
+		t.Fatal("Orca commands missing while enabled")
+	}
+}
+
+func TestSessionsHintsToCloseOldHandoffsWhenOrcaOff(t *testing.T) {
+	h := newHarness(t, nil)
+	h.st.PutTopic(store.Topic{ThreadID: 7, Kind: store.KindHandoff, Title: "old", LastActive: time.Now()})
+	h.b.HandleUpdate(bg, msg(0, owner, "/sessions"))
+	eventually(t, func() bool { return h.tg.textContains("/close") })
+}
+
+type stubHandoff struct{ HandoffAPI }
+
+func TestSessionsNoCloseHintWhenOrcaOn(t *testing.T) {
+	h := newHarness(t, func(c *config.Config) { c.OrcaEnabled = true })
+	h.b.SetHandoff(stubHandoff{})
+	h.st.PutTopic(store.Topic{ThreadID: 7, Kind: store.KindHandoff, Title: "live", LastActive: time.Now()})
+	h.b.HandleUpdate(bg, msg(0, owner, "/sessions"))
+	eventually(t, func() bool { return h.tg.textContains("handed off") })
+	if h.tg.textContains("/close") {
+		t.Fatal("close hint shown while handoff works")
 	}
 }

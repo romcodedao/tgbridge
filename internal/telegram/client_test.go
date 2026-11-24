@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -212,5 +213,38 @@ func TestDownloadTransportErrorHidesToken(t *testing.T) {
 	err := c.Download(context.Background(), "F", io.Discard)
 	if err == nil || strings.Contains(err.Error(), "botT") {
 		t.Fatal(err)
+	}
+}
+
+func TestFirstSenderOnlyFreshPrivateHumans(t *testing.T) {
+	now := time.Now().Unix()
+	c, r := fake(t, func(method string, body map[string]any, n int) (int, string) {
+		if body["offset"] == float64(15) {
+			return 200, `{"ok":true,"result":[]}`
+		}
+		return 200, fmt.Sprintf(`{"ok":true,"result":[
+			{"update_id":10,"message":{"message_id":1,"date":%[1]d,"from":{"id":99,"is_bot":true,"first_name":"b"},"chat":{"id":99,"type":"private"},"text":"hi"}},
+			{"update_id":11,"message":{"message_id":2,"date":%[1]d,"from":{"id":7,"first_name":"Grp"},"chat":{"id":-100,"type":"supergroup"},"text":"me"}},
+			{"update_id":12,"message":{"message_id":3,"date":%[2]d,"from":{"id":8,"first_name":"Old"},"chat":{"id":8,"type":"private"},"text":"earlier"}},
+			{"update_id":14,"message":{"message_id":4,"date":%[1]d,"from":{"id":123456789,"first_name":"Ann","username":"ann"},"chat":{"id":123456789,"type":"private"},"text":"/start"}}
+		]}`, now, now-3600)
+	})
+	u, err := c.FirstSender(context.Background(), time.Unix(now, 0))
+	if err != nil || u.ID != 123456789 || u.Username != "ann" {
+		t.Fatalf("want only a fresh private message from a person, got %+v, %v", u, err)
+	}
+	if got := r.calls[len(r.calls)-1].Body["offset"]; got != float64(15) {
+		t.Fatalf("the read update must be confirmed so serve doesn't replay it; last offset=%v", got)
+	}
+}
+
+func TestFirstSenderReturnsAPIErrors(t *testing.T) {
+	c, _ := fake(t, func(string, map[string]any, int) (int, string) {
+		return 409, `{"ok":false,"error_code":409,"description":"Conflict: terminated by other getUpdates request"}`
+	})
+	_, err := c.FirstSender(context.Background(), time.Now())
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Code != 409 {
+		t.Fatalf("want the 409 APIError, got %v", err)
 	}
 }

@@ -21,7 +21,7 @@
   It's cleared on `/reset`, rollover, `/close` and a new Claude session.
 
 **What Telegram sessions can read without asking (`ask` mode).**
-- **Without asking:** Read, Grep, Glob, `git status`, `ls`, and four exact read-only `orca` status commands.
+- **Without asking:** Read, Grep, Glob, `git status`, `ls`, and, only with `orca_enabled`, five exact read-only `orca` status commands.
 - **Always denied to the Read tool**, in every mode: `.env*`, `*.pem`, `*.key`, SSH keys, `~/.ssh`, Claude credentials, gh, aws, kube, docker, netrc, gnupg, git-credentials, the Orca config, and tgbridge's own config, token and state.
 - **The limit of that list:** it blocks the Read tool only, not every shell command, and files it doesn't name stay readable. That's why `ask` mode asks before any other Bash command. In `auto` and `full` modes, Claude Code's own rules decide instead.
 
@@ -32,4 +32,4 @@
 
 **Audit.** Every message (length only, not the text) and every approval decision goes to `~/.local/state/tgbridge/audit.log`.
 
-**`tgb hooks`.** It gives **every** Claude session on the machine the `telegram_send` tool, so a prompt-injected agent could send you a message. It can't read anything back.
+**`make hooks` (optional).** It gives **every** Claude session on the machine the `telegram_send` tool, so a prompt-injected agent could send you a message. It can't read anything back.

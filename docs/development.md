@@ -4,10 +4,12 @@
 
 ```bash
 make test                                                  # unit tests with the race detector
-TGBRIDGE_E2E_OWNER=<your id> go test -tags e2e ./e2e -v    # real bot, real claude (haiku), real Orca
+TGBRIDGE_E2E_OWNER=<your id> go test -tags e2e ./e2e -v    # real bot, real claude (haiku), Orca if installed
 ```
 
-The e2e tests post messages to your bot chat and open (then close) a throwaway Orca terminal. They need `~/.config/tgbridge/token`.
+The unit tests need no Claude, Telegram or Orca. The e2e tests post messages to your bot chat and, if Orca is installed, open (then close) a throwaway Orca terminal. They need `~/.config/tgbridge/token`.
+
+CI runs `go vet`, `go test -race` and [golangci-lint](https://golangci-lint.run/) (config: `.golangci.yml`) on every PR. To lint locally: `golangci-lint run ./...`.
 
 ## Layout
 
@@ -19,14 +21,14 @@ The e2e tests post messages to your bot chat and open (then close) a throwaway O
 | `internal/streamjson` | Parses Claude's stream-json events into turns |
 | `internal/render` | Turns into rich drafts and messages, the HTML fallback, approval text |
 | `internal/bot` | Routing, commands, approvals, context budget, engine settings |
-| `internal/handoff` | Orca session handoff: hooks, transcript tailing, input into the terminal |
+| `internal/handoff` | Optional Orca session handoff: hooks, transcript tailing, input into the terminal |
 | `internal/mcp`, `internal/ipc`, `internal/hookcmd` | The MCP server and hook command Claude runs, and their unix-socket link to the daemon |
 | `internal/store` | `state.json` and `audit.log` |
-| `internal/orca` | Orca CLI wrapper |
+| `internal/orca` | Orca CLI wrapper (used only with `orca_enabled`) |
 | `internal/install` | Adds and removes hooks and the MCP server in `~/.claude/settings.json` |
-
-Design history: [`docs/plans/`](plans/).
 
 ## Release
 
-Merge to `main`, then run `tgb update` on the machine.
+Push a tag like `v0.2.0` on `main`. The release workflow runs the tests, then [GoReleaser](https://goreleaser.com/) (`.goreleaser.yaml`) builds linux and darwin, amd64 and arm64 archives and publishes a GitHub release. Try it locally with `goreleaser release --snapshot --clean`.
+
+To update a source install: `make update` in the checkout.
