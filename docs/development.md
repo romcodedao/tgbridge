@@ -15,7 +15,7 @@ CI runs `go vet`, `go test -race` and [golangci-lint](https://golangci-lint.run/
 
 | Package | Role |
 |---|---|
-| `cmd/tgbridge` | CLI: `serve`, `mcp`, `hook <event>`, `install`, `uninstall`, `version` |
+| `cmd/tgbridge` | CLI: `init`, `doctor`, `service`, `hooks`, `serve`, `whoami`, `mcp`, `hook <event>`, `uninstall`, `version` (`install` is an alias for `hooks install`) |
 | `internal/telegram` | Minimal Bot API client (raw HTTP; rich messages, drafts, topics) and the long-poll update source |
 | `internal/engine` | Runs `claude -p` stream-json processes, one per topic; idle reaping, slot limit, queueing |
 | `internal/streamjson` | Parses Claude's stream-json events into turns |
@@ -25,6 +25,7 @@ CI runs `go vet`, `go test -race` and [golangci-lint](https://golangci-lint.run/
 | `internal/mcp`, `internal/ipc`, `internal/hookcmd` | The MCP server and hook command Claude runs, and their unix-socket link to the daemon |
 | `internal/store` | `state.json` and `audit.log` |
 | `internal/orca` | Orca CLI wrapper (used only with `orca_enabled`) |
+| `internal/setup` | The pieces of `init`, `doctor`, `service` (systemd and launchd) and `uninstall`; tested with fake runners and a fake Telegram |
 | `internal/install` | Adds and removes hooks and the MCP server in `~/.claude/settings.json` |
 
 ## Release
@@ -37,5 +38,7 @@ If that job fails, the release stays a draft:
 - **Code or workflow failure**: land the fix on `main` as a `fix:` commit; its release PR releases the next version. Once that next version is published, delete the stale draft and its tag: `gh release delete vX.Y.Z --cleanup-tag`.
 
 The release PR is opened with `GITHUB_TOKEN`, so CI does not run on it. Try the build locally with `goreleaser release --snapshot --clean`.
+
+`install.sh` has a test in `install_test.go` (`go test .`): it runs the script against a local fake release, including a bad checksum and no terminal. CI also runs `shellcheck install.sh`.
 
 To update a source install: `make update` in the checkout.

@@ -6,6 +6,8 @@ Read these before `make update` (it runs `git pull --ff-only`) when you come fro
 
 - **Back up `docs/plans/` first.** It is no longer tracked, so pulling deletes the copy in your checkout: `cp -a docs/plans ~/tgbridge-plans-backup` in the checkout, then copy it back after the update. New files there stay untracked (it's in `.gitignore`).
 - **Orca is now opt-in.** If you use `/sessions` with Orca agents or handoff, add `orca_enabled: true` to `~/.config/tgbridge/config.yaml`, then restart. Without it, Orca agents disappear from `/sessions` and handoff stops; handoff topics left open show a hint to `/close` them.
+- **Setup changed to `tgbridge init`.** Existing source installs: in the checkout run `git pull && make setup`. It rebuilds the binary and re-runs `init`, which keeps your config and token, asks nothing on a configured machine, and rewrites the service file with the binary's absolute path (`deploy/tgbridge.service` is gone; `tgbridge service install` generates the unit).
+- **`tgbridge uninstall` now removes the service too** (it used to remove only the hooks). To remove only the hooks and the MCP server, use `tgbridge hooks uninstall`. `install` still works as an alias for `hooks install`. Config and state are kept unless you add `--purge`.
 - **`owner_id` is found with `tgbridge whoami`** before the service runs. Existing configs need no change.
 
 ## Moving to another machine
@@ -50,11 +52,11 @@ echo "alias tgb='make -s -C ~/projects/tgbridge'" >> ~/.bashrc && source ~/.bash
 tgb doctor
 ```
 
-Expected: `make setup` ends with `active` (the restored config already has `owner_id`); `tgb doctor` shows `ok` lines.
+Expected: `make setup` ends with `Done.` (the restored config already has `owner_id`, so `init` asks nothing); `tgb doctor` shows `ok` lines.
 
-- **Config paths:** if the username or home path changed, edit `~/.config/tgbridge/config.yaml` (`default_cwd`, `orca_cli`) and run `tgb restart`. Paths written with `~` need no change.
+- **Config paths:** if the username or home path changed, edit `~/.config/tgbridge/config.yaml` (`default_cwd`, `orca_cli`) and run `tgbridge service install`. Paths written with `~` need no change.
 - **Linger:** if `doctor` reports it off, run `sudo loginctl enable-linger $USER`.
-- **Handoff (Orca only):** `tgb hooks`, then start new Orca Claude sessions.
+- **Handoff (Orca only):** `tgbridge hooks install`, then start new Orca Claude sessions.
 
 ### 4. Check from the phone
 
@@ -66,4 +68,4 @@ Send `/sessions` to the bot. You should see your old topics, and Orca agents if 
 tgb uninstall
 ```
 
-Expected: `removed service and hooks; kept …`. Delete `~/.config/tgbridge`, `~/.local/state/tgbridge` and the backup archive when you're sure the new machine works. The token is in them.
+Expected: a `Removed:` list (the service and the hooks) and a `Kept:` list (config, token, state). Delete `~/.config/tgbridge`, `~/.local/state/tgbridge` and the backup archive when you're sure the new machine works. The token is in them.

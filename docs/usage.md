@@ -57,7 +57,7 @@ Orca is a multi-agent IDE. tgbridge works without it. If you use Orca, set `orca
 
 ### Handing off an Orca session
 
-Needs `orca_enabled: true`, `make hooks` once, then a **new** Orca Claude session.
+Needs `orca_enabled: true`, `tgbridge hooks install` once, then a **new** Orca Claude session.
 
 1. Inside the Orca session, say **"notify me on Telegram"**, or tap 📲 in `/sessions`. A 📲 topic opens.
 2. Claude's output appears in that topic. What you type there goes into the terminal when Claude is idle; while it works, your message is queued.

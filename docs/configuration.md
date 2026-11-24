@@ -1,10 +1,10 @@
 # Configuration
 
-**File:** `~/.config/tgbridge/config.yaml`, mode 600. `make setup` creates it from [`config.example.yaml`](../config.example.yaml).
+**File:** `~/.config/tgbridge/config.yaml`, mode 600. `tgbridge init` creates it from [`config.example.yaml`](../config.example.yaml).
 
 **Paths:** `~` is expanded. You can override the file location with `TGBRIDGE_CONFIG`.
 
-**After editing:** run `systemctl --user restart tgbridge` (or `make restart` in the repo). A typo or invalid value stops the service from starting, and `journalctl --user -u tgbridge -n 50` shows why.
+**After editing:** run `tgbridge service install`: it re-installs the service and restarts it (on Linux, `systemctl --user restart tgbridge` works too). A typo or invalid value stops the service from starting. `tgbridge doctor` shows the config error; the log has the detail (Linux: `journalctl --user -u tgbridge -n 50`, macOS: `~/Library/Logs/tgbridge.log`).
 
 | Setting | Default | What it does |
 |---|---|---|
