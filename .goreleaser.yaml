@@ -25,6 +25,8 @@ checksum:
   name_template: checksums.txt
 
 release:
+  # release-please creates a draft with the notes; this uploads the assets and publishes it
+  use_existing_draft: true
   mode: keep-existing
 
 changelog:

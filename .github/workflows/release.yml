@@ -1,7 +1,8 @@
 name: Release
 
 # release-please and goreleaser share one run: a tag pushed with GITHUB_TOKEN
-# does not trigger other workflows.
+# does not trigger other workflows. release-please makes a draft release; goreleaser
+# publishes it only after the tests pass and the assets are uploaded.
 on:
   push:
     branches: [main]
@@ -47,7 +48,7 @@ jobs:
       - run: go test -race ./...
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
-          version: "~> v2"
+          version: v2.20.3
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

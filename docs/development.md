@@ -29,7 +29,7 @@ CI runs `go vet`, `go test -race` and [golangci-lint](https://golangci-lint.run/
 
 ## Release
 
-A Conventional Commit on `main` (`feat:`, `fix:`, ...) makes [release-please](https://github.com/googleapis/release-please) open or update a release PR. Merging it creates the tag, the GitHub release and `CHANGELOG.md`. In the same workflow run, [GoReleaser](https://goreleaser.com/) (`.goreleaser.yaml`) then builds linux and darwin, amd64 and arm64 archives, uploads them with `checksums.txt` and attests their build provenance. Verify a download with `gh attestation verify <file> -R romcodedao/tgbridge`.
+A Conventional Commit on `main` (`feat:`, `fix:`, ...) makes [release-please](https://github.com/googleapis/release-please) open or update a release PR. Merging it creates the tag, a **draft** GitHub release and `CHANGELOG.md`. In the same workflow run, the tests run again, then [GoReleaser](https://goreleaser.com/) (`.goreleaser.yaml`) builds linux and darwin, amd64 and arm64 archives, uploads them with `checksums.txt` to the draft and publishes it; their build provenance is attested. If that job fails, the release stays a draft: fix the cause on `main` if needed, then re-run the failed `goreleaser` job from the workflow run (Actions → Release → Re-run failed jobs). Verify a download with `gh attestation verify <file> -R romcodedao/tgbridge`.
 
 The release PR is opened with `GITHUB_TOKEN`, so CI does not run on it. Try the build locally with `goreleaser release --snapshot --clean`.
 
