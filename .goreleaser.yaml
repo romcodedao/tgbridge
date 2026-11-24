@@ -19,7 +19,6 @@ archives:
       - LICENSE
       - README.md
       - config.example.yaml
-      - deploy/tgbridge.service
 
 checksum:
   name_template: checksums.txt
