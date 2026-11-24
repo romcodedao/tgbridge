@@ -1,5 +1,5 @@
 # ~/.config/tgbridge/config.yaml
-owner_id: 0                 # your Telegram user ID (required; run `tgbridge whoami` to find it)
+owner_id: 0                 # your Telegram user ID (required; `tgbridge init` sets it, or find it with `tgbridge whoami`)
 token_file: ~/.config/tgbridge/token   # chmod 600; or set TGBRIDGE_TOKEN
 default_cwd: ~/              # folder new sessions start in
 # model: sonnet             # claude --model for Telegram sessions (default: your Claude Code default)

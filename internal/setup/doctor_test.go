@@ -37,6 +37,10 @@ func TestDoctorFails(t *testing.T) {
 	if s := doctorText(Doctor(context.Background(), r.env)); !strings.Contains(s, "WSL2") {
 		t.Errorf("want the WSL2 note:\n%s", s)
 	}
+	r.env.SvcErr = &NoServiceError{"systemd isn't running", "add [boot] systemd=true to /etc/wsl.conf"}
+	if s := doctorText(Doctor(context.Background(), r.env)); !strings.Contains(s, "warn  service") || !strings.Contains(s, "systemd isn't running") || !strings.Contains(s, "fix: add [boot] systemd=true") {
+		t.Errorf("want the reason as a warning with a fix:\n%s", s)
+	}
 }
 
 func TestDoctorThreadedModeOff(t *testing.T) {

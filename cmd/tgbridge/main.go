@@ -207,9 +207,9 @@ func run(ctx context.Context, name string, args ...string) (string, error) {
 
 func env() setup.Env {
 	home, _ := os.UserHomeDir()
-	svc, _ := setup.ForOS(runtime.GOOS, home, run)
+	svc, svcErr := setup.ForOS(runtime.GOOS, home, run) // on error svc is nil and svcErr says why
 	return setup.Env{ConfigPath: configPath(), Home: home, GOOS: runtime.GOOS, Bin: self(), Version: ver(),
-		Example: tgbridge.ExampleConfig, Run: run, LookPath: exec.LookPath, Svc: svc, ClaudeSettings: claudeSettings()}
+		Example: tgbridge.ExampleConfig, Run: run, LookPath: exec.LookPath, Svc: svc, SvcErr: svcErr, ClaudeSettings: claudeSettings()}
 }
 
 // secret reads a line from in with terminal echo off; Ctrl+C (or TERM, HUP, QUIT) restores echo before exiting.
@@ -245,14 +245,18 @@ func secret(in *bufio.Reader) func() (string, error) {
 func service(cmd string) int {
 	e, ctx := env(), context.Background()
 	if e.Svc == nil {
-		fmt.Fprintf(os.Stderr, "no service support on %s: run tgbridge inside WSL2, or run tgbridge serve yourself\n", e.GOOS)
+		fmt.Fprintln(os.Stderr, e.SvcErr)
 		return 1
 	}
 	yes := map[bool]string{true: "yes", false: "no"}
 	switch cmd {
 	case "install":
 		claude, _ := exec.LookPath(e.ClaudeBin())
-		if err := e.Svc.Install(ctx, e.Bin, setup.ServicePATH(claude)); err != nil {
+		bak, err := e.Svc.Install(ctx, e.Bin, setup.ServicePATH(claude), setup.ServiceEnv(e.ConfigPath))
+		if bak != "" {
+			fmt.Printf("previous unit saved to %s\n", bak)
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}

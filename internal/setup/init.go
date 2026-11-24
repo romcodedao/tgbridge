@@ -98,6 +98,17 @@ func Init(ctx context.Context, e Env, p Prompt, noService bool) (err error) {
 			me, token = m, tok
 		}
 	}
+	if t := strings.TrimSpace(os.Getenv("TGBRIDGE_TOKEN")); t != "" && t == token {
+		if _, err := os.Stat(cfg.TokenFile); missing(err) { // the service never sees this shell's TGBRIDGE_TOKEN
+			if err := os.MkdirAll(filepath.Dir(cfg.TokenFile), 0o700); err != nil {
+				return err
+			}
+			if err := writeSecret(cfg.TokenFile, []byte(t)); err != nil {
+				return err
+			}
+			say("Saved TGBRIDGE_TOKEN to %s, so the service can read it", cfg.TokenFile)
+		}
+	}
 	say("Bot: @%s", me.Username)
 
 	if cfg.OwnerID == 0 {
@@ -106,20 +117,31 @@ func Init(ctx context.Context, e Env, p Prompt, noService bool) (err error) {
 		}
 	}
 
+	installed := false
 	switch {
 	case noService:
 		say("Skipped the service (--no-service). Later: tgbridge service install")
 	case e.Svc == nil:
-		say("No service manager on %s: on Windows, run tgbridge inside WSL2; otherwise run tgbridge serve yourself.", e.GOOS)
+		say("No service: %s", e.noService())
+	case inTemp(e.Bin):
+		say("Skipped the service: the service will run %s, a temporary file; install tgbridge first (see docs/install.md)", e.Bin)
 	default:
-		if err := e.Svc.Install(ctx, e.Bin, ServicePATH(ci.Path)); err != nil {
+		bak, err := e.Svc.Install(ctx, e.Bin, ServicePATH(ci.Path), ServiceEnv(e.ConfigPath))
+		if bak != "" {
+			say("previous unit saved to %s", bak)
+		}
+		if err != nil {
 			say("Service install failed: %v", err)
 		} else {
+			installed = true
 			for end := time.Now().Add(activeWait); !e.Svc.Active(ctx) && time.Now().Before(end); {
 				time.Sleep(250 * time.Millisecond)
 			}
 			say("Installed the %s service: %s", e.Svc.Name(), e.Svc.Path())
 		}
+	}
+	if stopped && !installed {
+		say("service is stopped; start it with: tgbridge service install")
 	}
 
 	say("\nSummary:")
@@ -208,8 +230,25 @@ func readLine(ctx context.Context, in *bufio.Reader) (string, error) {
 	}
 }
 
-// writeSecret replaces path atomically with a 0600 file.
+// inTemp reports whether bin is under the temp dir, like a `go run` build.
+func inTemp(bin string) bool {
+	tmp := os.TempDir()
+	if r, err := filepath.EvalSymlinks(tmp); err == nil {
+		tmp = r // macOS: /var/folders -> /private/var/folders, as self() resolves
+	}
+	for _, d := range []string{os.TempDir(), tmp} {
+		if strings.HasPrefix(filepath.Clean(bin), filepath.Clean(d)+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// writeSecret replaces path atomically with a 0600 file; a symlink's target is replaced, keeping the link.
 func writeSecret(path string, b []byte) error {
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		path = r
+	}
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*") // created 0600
 	if err != nil {
 		return err

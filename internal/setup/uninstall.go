@@ -121,8 +121,13 @@ func UninstallPlan(e Env, cfg *config.Config, purge bool) (do []Action, kept []s
 	realBin, _ := filepath.EvalSymlinks(bin)
 	if real == bin || real != "" && real == realBin {
 		rm(bin, "")
-	} else if e.Bin != "" && lexists(e.Bin) {
-		kept = append(kept, e.Bin+": remove it yourself: rm "+e.Bin)
+	} else {
+		if e.Bin != "" && lexists(e.Bin) {
+			kept = append(kept, e.Bin+": remove it yourself: rm "+e.Bin)
+		}
+		if lexists(bin) { // another copy, maybe from install.sh: not the one running, so not ours to judge
+			kept = append(kept, bin+": remove it yourself: rm "+bin)
+		}
 	}
 	return do, kept
 }

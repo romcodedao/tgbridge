@@ -147,6 +147,10 @@ func TestPurgeBinaryElsewhereKept(t *testing.T) {
 	if !hasKept(kept, "remove it yourself: rm "+e.Bin) {
 		t.Fatalf("kept %v", kept)
 	}
+	// The rig's ~/.local/bin/tgbridge is another copy: listed, not deleted.
+	if !hasKept(kept, "remove it yourself: rm "+filepath.Join(e.Home, ".local/bin/tgbridge")) {
+		t.Fatalf("~/.local/bin/tgbridge not listed: %v", kept)
+	}
 }
 
 func TestPurgeUnsafePaths(t *testing.T) {

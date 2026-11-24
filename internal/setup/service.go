@@ -6,10 +6,14 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/romcodedao/tgbridge/internal/config"
 )
 
 const label = "io.github.romcodedao.tgbridge"
@@ -20,15 +24,28 @@ type Service interface {
 	Path() string
 	Installed() bool
 	Active(ctx context.Context) bool
-	Install(ctx context.Context, bin, pathEnv string) error
+	// Install writes the unit with PATH and env, then (re)starts it. A hand-edited unit is saved first: bak is its path, or "".
+	Install(ctx context.Context, bin, pathEnv string, env map[string]string) (bak string, err error)
 	Stop(ctx context.Context) error
 	Uninstall(ctx context.Context) error
 }
+
+// NoServiceError says why this machine has no service manager and how to get one.
+type NoServiceError struct{ Why, Fix string }
+
+func (e *NoServiceError) Error() string { return e.Why + ": " + e.Fix }
+
+// systemdDir exists only while systemd runs (sd_booted); a var for tests.
+var systemdDir = "/run/systemd/system"
 
 // ForOS returns the service manager for goos; Windows is WSL2 only.
 func ForOS(goos, home string, run Runner) (Service, error) {
 	switch goos {
 	case "linux":
+		if !exists(systemdDir) {
+			return nil, &NoServiceError{"systemd isn't running (no " + systemdDir + ")",
+				"on WSL2, add [boot] systemd=true to /etc/wsl.conf, run wsl --shutdown in Windows and reopen WSL, then tgbridge service install; otherwise run tgbridge serve yourself"}
+		}
 		return systemd{home, run}, nil
 	case "darwin":
 		return launchd{home, os.Getuid(), run, time.Sleep}, nil
@@ -46,8 +63,23 @@ func esc(s string) string {
 	return b.String()
 }
 
+// ServiceEnv is the extra environment the service needs: TGBRIDGE_CONFIG when the config isn't at the default path.
+func ServiceEnv(configPath string) map[string]string {
+	if configPath == "" || configPath == config.DefaultPath() {
+		return nil
+	}
+	if abs, err := filepath.Abs(configPath); err == nil {
+		configPath = abs
+	}
+	return map[string]string{"TGBRIDGE_CONFIG": configPath}
+}
+
 // SystemdUnit renders the user unit.
-func SystemdUnit(bin, pathEnv string) string {
+func SystemdUnit(bin, pathEnv string, env map[string]string) string {
+	extra := ""
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		extra += `Environment="` + pct(k+"="+env[k]) + "\"\n"
+	}
 	return `[Unit]
 Description=tgbridge - Claude Code over Telegram
 After=network-online.target
@@ -57,21 +89,25 @@ ExecStart="` + pct(bin) + `" serve
 Restart=on-failure
 RestartSec=5
 Environment="PATH=` + pct(pathEnv) + `"
-
+` + extra + `
 [Install]
 WantedBy=default.target
 `
 }
 
 // LaunchdPlist renders the launch agent.
-func LaunchdPlist(bin, pathEnv, logPath string) string {
+func LaunchdPlist(bin, pathEnv, logPath string, env map[string]string) string {
+	extra := ""
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		extra += "<key>" + esc(k) + "</key><string>" + esc(env[k]) + "</string>"
+	}
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
 <key>Label</key><string>` + label + `</string>
 <key>ProgramArguments</key><array><string>` + esc(bin) + `</string><string>serve</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>` + esc(pathEnv) + `</string></dict>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>` + esc(pathEnv) + `</string>` + extra + `</dict>
 <key>StandardOutPath</key><string>` + esc(logPath) + `</string>
 <key>StandardErrorPath</key><string>` + esc(logPath) + `</string>
 </dict></plist>
@@ -97,6 +133,17 @@ func ServicePATH(claudePath string) string {
 		}
 	}
 	return strings.Join(out, ":")
+}
+
+// writeUnit writes body to path, first copying a different existing file to path.bak (returned).
+func writeUnit(path, body string) (bak string, err error) {
+	if old, err := os.ReadFile(path); err == nil && string(old) != body {
+		bak = path + ".bak"
+		if err := os.WriteFile(bak, old, 0o644); err != nil {
+			return "", err
+		}
+	}
+	return bak, write(path, body)
 }
 
 func write(path, body string) error {
@@ -134,16 +181,17 @@ func (s systemd) Active(ctx context.Context) bool {
 	return strings.TrimSpace(out) == "active"
 }
 
-func (s systemd) Install(ctx context.Context, bin, pathEnv string) error {
-	if err := write(s.Path(), SystemdUnit(bin, pathEnv)); err != nil {
-		return err
+func (s systemd) Install(ctx context.Context, bin, pathEnv string, env map[string]string) (string, error) {
+	bak, err := writeUnit(s.Path(), SystemdUnit(bin, pathEnv, env))
+	if err != nil {
+		return "", err
 	}
 	for _, a := range [][]string{{"daemon-reload"}, {"enable", "tgbridge"}, {"restart", "tgbridge"}} {
 		if err := s.ctl(ctx, a...); err != nil {
-			return err
+			return bak, err
 		}
 	}
-	return nil
+	return bak, nil
 }
 
 // Stop runs even without a unit file (one may still be running) and, like launchd, ignores "not loaded".
@@ -179,17 +227,17 @@ func (l launchd) Active(ctx context.Context) bool {
 	return strings.Contains(out, "state = running")
 }
 
-func (l launchd) Install(ctx context.Context, bin, pathEnv string) error {
+func (l launchd) Install(ctx context.Context, bin, pathEnv string, env map[string]string) (string, error) {
 	log := filepath.Join(l.home, "Library/Logs/tgbridge.log")
 	if err := os.MkdirAll(filepath.Dir(log), 0o755); err != nil {
-		return err
+		return "", err
 	}
-	if err := write(l.Path(), LaunchdPlist(bin, pathEnv, log)); err != nil {
-		return err
+	bak, err := writeUnit(l.Path(), LaunchdPlist(bin, pathEnv, log, env))
+	if err != nil {
+		return "", err
 	}
 	_ = l.Stop(ctx) // not loaded yet is fine
 	// bootout is asynchronous, so an early bootstrap can fail with an I/O error.
-	var err error
 	for i := 0; i < 5; i++ {
 		if i > 0 {
 			l.sleep(500 * time.Millisecond)
@@ -198,7 +246,7 @@ func (l launchd) Install(ctx context.Context, bin, pathEnv string) error {
 			break
 		}
 	}
-	return err
+	return bak, err
 }
 
 func (l launchd) Stop(ctx context.Context) error {

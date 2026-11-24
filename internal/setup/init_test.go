@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -83,6 +84,8 @@ type fakeSvc struct {
 	ev                *events
 	installed, active bool
 	installs          int
+	env               map[string]string // from the last Install
+	bak               string            // Install reports this backup
 }
 
 func (s *fakeSvc) Name() string                    { return "fakesvc" }
@@ -91,11 +94,11 @@ func (s *fakeSvc) Installed() bool                 { return s.installed }
 func (s *fakeSvc) Active(context.Context) bool     { return s.active }
 func (s *fakeSvc) Uninstall(context.Context) error { s.installed = false; return nil }
 func (s *fakeSvc) Stop(context.Context) error      { s.ev.add("stop"); s.active = false; return nil }
-func (s *fakeSvc) Install(_ context.Context, bin, path string) error {
+func (s *fakeSvc) Install(_ context.Context, bin, path string, env map[string]string) (string, error) {
 	s.ev.add("install")
 	s.installs++
-	s.installed, s.active = true, true
-	return nil
+	s.installed, s.active, s.env = true, true, env
+	return s.bak, nil
 }
 
 type rig struct {
@@ -362,5 +365,109 @@ func TestInitLeavesForeignConfigDir(t *testing.T) {
 	must(t, Init(context.Background(), r.env, p, false))
 	if mode(t, dir) != 0o755 {
 		t.Fatalf("a dir that isn't tgbridge's own must keep its mode, got %v", mode(t, dir))
+	}
+}
+
+func TestInitCustomConfigReachesService(t *testing.T) {
+	r := newRig(t, 7)
+	r.env.ConfigPath = filepath.Join(r.home, "x.yaml") // TGBRIDGE_CONFIG=~/x.yaml
+	p, out, _ := prompt(t, "y\n", goodToken)
+	if err := Init(context.Background(), r.env, p, false); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if r.svc.env["TGBRIDGE_CONFIG"] != r.env.ConfigPath {
+		t.Fatalf("service env %v", r.svc.env)
+	}
+}
+
+func TestInitDefaultConfigNoServiceEnv(t *testing.T) {
+	r := newRig(t, 7)
+	p, _, _ := prompt(t, "y\n", goodToken)
+	must(t, Init(context.Background(), r.env, p, false))
+	if r.svc.installs != 1 || r.svc.env != nil {
+		t.Fatalf("default config: no env, got %v", r.svc.env)
+	}
+}
+
+func TestInitWritesEnvTokenToFile(t *testing.T) {
+	r := newRig(t, 7)
+	t.Setenv("TGBRIDGE_TOKEN", goodToken)
+	p, out, n := prompt(t, "y\n") // no Secret answers: the env token must be used
+	if err := Init(context.Background(), r.env, p, false); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if *n != 0 || read(t, r.tokenPath()) != goodToken || mode(t, r.tokenPath()) != 0o600 {
+		t.Fatalf("env token not saved to the token file, asks=%d", *n)
+	}
+	if !strings.Contains(out.String(), "TGBRIDGE_TOKEN") {
+		t.Fatalf("want a note about TGBRIDGE_TOKEN:\n%s", out)
+	}
+}
+
+func TestInitEnvTokenKeepsExistingFile(t *testing.T) {
+	r := newRig(t, 7)
+	must(t, os.MkdirAll(filepath.Dir(r.tokenPath()), 0o700))
+	must(t, os.WriteFile(r.tokenPath(), []byte("999:other"), 0o600))
+	t.Setenv("TGBRIDGE_TOKEN", goodToken)
+	p, out, _ := prompt(t, "y\n")
+	if err := Init(context.Background(), r.env, p, false); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if read(t, r.tokenPath()) != "999:other" {
+		t.Fatal("an existing token file must not be overwritten")
+	}
+}
+
+func TestInitReportsUnitBackup(t *testing.T) {
+	r := newRig(t, 7)
+	r.svc.bak = "/fake/unit.bak"
+	p, out, _ := prompt(t, "y\n", goodToken)
+	must(t, Init(context.Background(), r.env, p, false))
+	if !strings.Contains(out.String(), "previous unit saved to /fake/unit.bak") {
+		t.Fatalf("want the backup note:\n%s", out)
+	}
+}
+
+func TestInitNoServiceAfterStopSaysServiceStopped(t *testing.T) {
+	r := newRig(t, 7)
+	r.svc.installed, r.svc.active = true, true
+	p, out, _ := prompt(t, "y\n", goodToken)
+	must(t, Init(context.Background(), r.env, p, true))
+	if !strings.Contains(out.String(), "service is stopped; start it with: tgbridge service install") {
+		t.Fatalf("want the restart hint:\n%s", out)
+	}
+}
+
+func TestInitTempBinarySkipsService(t *testing.T) {
+	r := newRig(t, 7)
+	r.env.Bin = filepath.Join(os.TempDir(), "go-build1/b001/exe/tgbridge") // go run
+	p, out, _ := prompt(t, "y\n", goodToken)
+	must(t, Init(context.Background(), r.env, p, false))
+	if r.svc.installs != 0 || !strings.Contains(out.String(), "a temporary file; install tgbridge first (see docs/install.md)") {
+		t.Fatalf("a temp binary must not be installed as the service (installs=%d):\n%s", r.svc.installs, out)
+	}
+}
+
+func TestInitSaysWhyNoService(t *testing.T) {
+	r := newRig(t, 7)
+	r.env.Svc, r.env.SvcErr = nil, errors.New("systemd isn't running: enable it in /etc/wsl.conf")
+	p, out, _ := prompt(t, "y\n", goodToken)
+	must(t, Init(context.Background(), r.env, p, false))
+	if !strings.Contains(out.String(), "/etc/wsl.conf") {
+		t.Fatalf("want the reason:\n%s", out)
+	}
+}
+
+func TestSetOwnerKeepsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	real, link := filepath.Join(dir, "dotfiles-config.yaml"), filepath.Join(dir, "config.yaml")
+	must(t, os.WriteFile(real, []byte("owner_id: 0\n"), 0o600))
+	must(t, os.Symlink(real, link))
+	must(t, SetOwner(link, 42))
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the symlink was replaced by a file")
+	}
+	if read(t, real) != "owner_id: 42\n" {
+		t.Fatalf("target not updated: %q", read(t, real))
 	}
 }

@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -60,9 +61,12 @@ func Doctor(ctx context.Context, e Env) []Check {
 		}
 	}
 
+	var nse *NoServiceError
 	switch {
+	case errors.As(e.SvcErr, &nse):
+		cs = append(cs, Check{Warn, "service", nse.Why, nse.Fix})
 	case e.Svc == nil:
-		cs = append(cs, Check{Info, "service", "no service manager on " + e.GOOS + ": on Windows, run tgbridge inside WSL2; otherwise run tgbridge serve yourself", ""})
+		cs = append(cs, Check{Info, "service", e.noService(), ""})
 	case !e.Svc.Installed():
 		cs = append(cs, Check{Fail, "service", "not installed", "tgbridge service install"})
 	case !e.Svc.Active(ctx):

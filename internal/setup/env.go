@@ -14,6 +14,7 @@ type Env struct {
 	Run                                                Runner
 	LookPath                                           func(string) (string, error)
 	Svc                                                Service // nil: no service manager on this OS
+	SvcErr                                             error   // why Svc is nil, from ForOS
 	ClaudeSettings                                     string  // ~/.claude/settings.json
 }
 
@@ -29,3 +30,11 @@ func (e Env) ClaudeBin() string {
 }
 
 func missing(err error) bool { return errors.Is(err, fs.ErrNotExist) }
+
+// noService says why there is no service and what to do instead.
+func (e Env) noService() string {
+	if e.SvcErr != nil {
+		return e.SvcErr.Error()
+	}
+	return "no service manager on " + e.GOOS + ": on Windows, run tgbridge inside WSL2; otherwise run tgbridge serve yourself"
+}
