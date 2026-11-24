@@ -352,3 +352,15 @@ func TestInitTightensConfigDir(t *testing.T) {
 		t.Fatalf("temp files left behind: %v", ents)
 	}
 }
+
+func TestInitLeavesForeignConfigDir(t *testing.T) {
+	r := newRig(t, 7)
+	dir := filepath.Join(t.TempDir(), "mine")
+	must(t, os.Mkdir(dir, 0o755))
+	r.env.ConfigPath = filepath.Join(dir, "tgbridge.yaml") // e.g. TGBRIDGE_CONFIG=~/tgbridge.yaml
+	p, _, _ := prompt(t, "y\n", goodToken)
+	must(t, Init(context.Background(), r.env, p, false))
+	if mode(t, dir) != 0o755 {
+		t.Fatalf("a dir that isn't tgbridge's own must keep its mode, got %v", mode(t, dir))
+	}
+}

@@ -43,8 +43,10 @@ func Init(ctx context.Context, e Env, p Prompt, noService bool) (err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(dir, 0o700); err != nil { // the token usually lives here too
-		return err
+	if strings.Contains(filepath.Base(dir), "tgbridge") { // never chmod a shared dir like HOME or /etc
+		if err := os.Chmod(dir, 0o700); err != nil { // the token usually lives here too
+			return err
+		}
 	}
 	if _, err := os.Stat(e.ConfigPath); missing(err) {
 		if err := writeSecret(e.ConfigPath, e.Example); err != nil {
