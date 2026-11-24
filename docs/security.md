@@ -32,4 +32,4 @@
 
 **Audit.** Every message (length only, not the text) and every approval decision goes to `~/.local/state/tgbridge/audit.log`.
 
-**`make hooks` (optional).** It gives **every** Claude session on the machine the `telegram_send` tool, so a prompt-injected agent could send you a message. It can't read anything back.
+**`tgbridge hooks install` (optional; `make hooks` in a checkout).** It gives **every** Claude session on the machine the `telegram_send` tool, so a prompt-injected agent could send you a message. It can't read anything back.

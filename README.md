@@ -7,7 +7,13 @@
 
 Drive real Claude Code sessions from a private Telegram chat: one topic per session, live streaming with thinking, and permission prompts as buttons.
 
-It runs the `claude` CLI already installed on your machine, as a `systemd --user` service. Only your Telegram account can use it. It long-polls Telegram, so it needs no open port.
+> **Risk.** tgbridge lets your Telegram account run Claude Code as your user on this machine. Anyone who controls that account, or the bot token, can use your files and tools. Read [Security](#security-model) first.
+
+Not affiliated with Anthropic or Telegram.
+
+<!-- TODO: demo GIF (add it here once recorded) -->
+
+It runs the `claude` CLI already installed on your machine, as a background service (systemd on Linux, launchd on macOS). Only your Telegram account can use it. It long-polls Telegram, so it needs no open port.
 
 ![tgbridge architecture: Telegram updates reach the tgbridge daemon by long polling; it runs one claude -p session per topic and keeps its state](docs/architecture.svg)
 
@@ -15,10 +21,10 @@ It runs the `claude` CLI already installed on your machine, as a `systemd --user
 
 ## Requirements
 
-- Linux with systemd (for the service). macOS builds work, but there's no launchd unit: run `tgbridge serve` yourself.
+- Linux with systemd, or macOS. Linux and macOS, amd64 and arm64.
+- **Windows:** install Claude Code inside WSL2 and run tgbridge there. There is no Windows binary.
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) installed and logged in (`claude` runs in a terminal).
 - A Telegram account.
-- To build from source: Go 1.27+, `git` and `make`.
 
 ## Install
 
@@ -26,60 +32,64 @@ It runs the `claude` CLI already installed on your machine, as a `systemd --user
 
 In [@BotFather](https://t.me/BotFather) send `/newbot` and copy the token. Then in the BotFather Mini App → your bot → **Threads Settings**, turn **Threaded Mode** on and leave "Disallow users to create new threads" off. Open your bot and press **Start**.
 
-### 2. Save the token (machine)
+### 2. Run the installer (machine)
 
 ```bash
-mkdir -p ~/.config/tgbridge && chmod 700 ~/.config/tgbridge
-read -rsp "token: " T && printf '%s' "$T" > ~/.config/tgbridge/token && chmod 600 ~/.config/tgbridge/token && unset T && echo saved
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh | sh
 ```
 
-Expected: `token: saved`
+It downloads the release for your machine, checks its sha256, puts `tgbridge` in `~/.local/bin`, then starts `tgbridge init`. The wizard asks for your bot token (hidden), waits for your first message to the bot to learn your user ID, and installs and starts the service. Expected:
 
-### 3. Install (machine)
+```text
+Claude Code:
+  ok    claude        /home/you/.local/bin/claude 2.1.0 (Claude Code)
+  ok    claude login  logged in (claude.ai)
+Wrote /home/you/.config/tgbridge/config.yaml
+Create a bot with @BotFather (/newbot) and paste its token here (input is hidden).
+Bot token:
+Saved the token to /home/you/.config/tgbridge/token
+Bot: @yourbot
+Send any message to @yourbot now, in a private chat (Ctrl+C to cancel)...
+Message from Alex (@alex), user ID 123456789. This account will control Claude on this machine.
+Is this you? [y/N] y
+Saved owner_id: 123456789
+Installed the systemd service: /home/you/.config/systemd/user/tgbridge.service
 
-**From source** (builds `~/.local/bin/tgbridge`, creates the config and installs the systemd unit):
+Summary:
+  ok    ...
+Done. Send @yourbot a message: a new topic starts your first session.
+```
+
+Check the name before you answer `y` (Enter alone means no, and init waits for the next message): that account will control Claude on this machine. Send the bot a message on your phone: a new topic opens with your Claude session.
+
+To keep it running after you log out on Linux: `sudo loginctl enable-linger $USER` (`tgbridge doctor` tells you if it's off).
+
+`init` is safe to re-run. It skips what is already done and fixes what is broken; it restarts the service only if its unit changed, as after an upgrade, or the service isn't running.
+
+**Read it first.** To read the script before it runs:
 
 ```bash
-git clone https://github.com/romcodedao/tgbridge && cd tgbridge
-make setup
+curl --proto '=https' --tlsv1.2 -fsSL -o install.sh https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh
+less install.sh
+sh install.sh
 ```
 
-Expected: `built …`, `created ~/.config/tgbridge/config.yaml`, then `owner_id not set. Run: …/tgbridge whoami …`. The service isn't started yet.
-
-**Or from a release binary** (pick your OS and architecture on the [releases page](https://github.com/romcodedao/tgbridge/releases)):
+**With Go** (the binary lands in `$(go env GOPATH)/bin`, which must be on your PATH):
 
 ```bash
-mkdir -p ~/.local/bin ~/.config/tgbridge ~/.config/systemd/user && cd "$(mktemp -d)"
-curl -fsSLO https://github.com/romcodedao/tgbridge/releases/download/vX.Y.Z/tgbridge_X.Y.Z_linux_amd64.tar.gz
-tar xzf tgbridge_*.tar.gz
-install -m 755 tgbridge ~/.local/bin/tgbridge
-install -m 600 config.example.yaml ~/.config/tgbridge/config.yaml
-cp deploy/tgbridge.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+go install github.com/romcodedao/tgbridge/cmd/tgbridge@latest
+tgbridge init
 ```
 
-### 4. Set your user ID, then start (machine and phone)
+Manual steps, installer options, macOS notes and WSL2: [docs/install.md](docs/install.md).
+
+## Uninstall
 
 ```bash
-~/.local/bin/tgbridge whoami
+tgbridge uninstall
 ```
 
-Expected: `Send any message to @yourbot now, in a private chat…`. Send the bot any message from your phone, in its private chat. It prints `Message from <name> (@<username>), user ID 123456789. Check this is you…` and the `owner_id:` line to use. Check the name: that account will control Claude on this machine. If it says `Conflict`, the service is already running: `systemctl --user stop tgbridge`, then try again.
-
-Put that number in `~/.config/tgbridge/config.yaml` (replace `123456789` with yours):
-
-```bash
-sed -i 's/^owner_id: 0 .*/owner_id: 123456789/' ~/.config/tgbridge/config.yaml && grep '^owner_id' ~/.config/tgbridge/config.yaml
-```
-
-Then start the service. From source: `make setup` again. From a release binary:
-
-```bash
-systemctl --user enable --now tgbridge && sleep 3 && systemctl --user is-active tgbridge
-```
-
-Expected: `active`. If it says `activating` or `failed`, `journalctl --user -u tgbridge -n 50` shows why. Now send any message to the bot: a new topic opens with your Claude session.
-
-To keep it running after you log out: `sudo loginctl enable-linger $USER`.
+It removes the service and the Claude Code hooks. Your config, token and state stay. Add `--purge` to delete those too, or `--dry-run` to see the plan first: [docs/install.md](docs/install.md#uninstall).
 
 ## Configure
 
@@ -115,27 +125,28 @@ The deny list blocks the Read tool, not every shell command: that's why `ask` mo
 
 ## Optional: Orca integration
 
-If you use the Orca multi-agent IDE, set `orca_enabled: true`. `/sessions` then lists Orca agents, `/status` shows their last messages, and you can hand a running Orca Claude session off to Telegram (run `make hooks` once). Without it, tgbridge doesn't need or call Orca. See [Using the bot](docs/usage.md#optional-orca-integration).
+If you use the Orca multi-agent IDE, set `orca_enabled: true`. `/sessions` then lists Orca agents, `/status` shows their last messages, and you can hand a running Orca Claude session off to Telegram (run `tgbridge hooks install` once). Without it, tgbridge doesn't need or call Orca. See [Using the bot](docs/usage.md#optional-orca-integration).
 
 ## Day to day
 
-From the checkout (or add the optional alias `alias tgb='make -s -C /path/to/tgbridge'` and use `tgb <command>` anywhere):
-
 | I want to… | Run |
 |---|---|
-| Check everything | `make doctor` |
-| Check it's running | `make status` |
-| Watch the log live | `make logs` |
-| Restart / stop / start | `make restart` · `make stop` · `make start` |
-| Update to the latest `main` | `make update` |
-| See all commands | `make` |
+| Check everything | `tgbridge doctor` |
+| Check it's running | `tgbridge service status` |
+| Apply a config change (re-installs and restarts the service) | `tgbridge service install` |
+| Watch the log (Linux) | `journalctl --user -u tgbridge -f` |
+| Watch the log (macOS) | `tail -f ~/Library/Logs/tgbridge.log` |
+| Update | Run the installer again (it keeps your config) |
+
+Source checkouts also have `make` shortcuts: [docs/operations.md](docs/operations.md).
 
 In Telegram: `/help` lists the commands. `/mode ask|auto|full` sets how much Claude may do without asking. `/stop` interrupts. `/exit` ends a session.
 
 ## Docs
 
 - [Using the bot](docs/usage.md): topics, photos and files, commands, permission modes, context limits, Orca
-- [Operations](docs/operations.md): every `make` command, files, troubleshooting
+- [Install](docs/install.md): installer options, manual install, macOS, WSL2, uninstall
+- [Operations](docs/operations.md): day-to-day commands, files, troubleshooting
 - [Configuration](docs/configuration.md): every setting in `config.yaml`
 - [Upgrading and moving to another machine](docs/migration.md): read the upgrade notes before updating
 - [Security](docs/security.md)

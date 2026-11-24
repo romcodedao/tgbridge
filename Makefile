@@ -4,12 +4,12 @@
 SHELL   := /bin/bash
 BIN     ?= $(HOME)/.local/bin/tgbridge
 UNIT    := tgbridge
-UNITDIR := $(HOME)/.config/systemd/user
-CONF    := $(HOME)/.config/tgbridge
-STATE   := $(HOME)/.local/state/tgbridge
-VERSION := $(shell git -C $(CURDIR) describe --always --dirty 2>/dev/null || echo dev)
+# v-prefixed like release builds and go install: a tag (v0.1.0-3-gabc1234), else v0.0.0-<commit>
+VERSION := $(shell git -C $(CURDIR) describe --tags --match 'v[0-9]*' --dirty 2>/dev/null || echo v0.0.0-$$(git -C $(CURDIR) describe --always --dirty 2>/dev/null || echo dev))
 SC      := systemctl --user
 JC      := journalctl --user -u $(UNIT)
+# need fails unless the installed binary's usage mentions $(1): a binary older than this checkout lacks the subcommand
+need     = @[ -x "$(BIN)" ] || { echo "tgbridge is not installed: run make setup" >&2; exit 1; }; $(BIN) 2>&1 | grep -q -- '$(1)' || { echo "the installed binary is older than this checkout: run make build (or make setup) first" >&2; exit 1; }
 
 .DEFAULT_GOAL := help
 .PHONY: help status logs logs-recent errors start stop restart build test deploy update setup hooks unhooks doctor backup uninstall version
@@ -17,8 +17,9 @@ JC      := journalctl --user -u $(UNIT)
 help: ## list commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | awk -F'\t' '{printf "  %-12s %s\n", $$1, $$2}'
 
-status: ## is it running? version, uptime, memory, last log lines
-	@$(SC) status $(UNIT) --no-pager -n 5 | sed -n '1,12p'
+status: ## is it running? (service status)
+	$(call need,service install)
+	@$(BIN) service status
 
 logs: ## follow the log live (Ctrl+C to quit)
 	@$(JC) -f -n 20
@@ -52,44 +53,24 @@ deploy: build restart ## build from this checkout and restart
 update: ## pull main, test, build and restart
 	@git -C $(CURDIR) pull --ff-only && $(MAKE) -s test && $(MAKE) -s deploy
 
-setup: build ## first-time install: config folder, systemd unit; starts the service once owner_id is set (run it again after setting it)
-	@mkdir -p $(CONF) $(UNITDIR) && chmod 700 $(CONF)
-	@test -f $(CONF)/config.yaml || { cp config.example.yaml $(CONF)/config.yaml && chmod 600 $(CONF)/config.yaml && echo "created $(CONF)/config.yaml"; }
-	@test -f $(CONF)/token || { echo "missing $(CONF)/token: see README step 2"; exit 1; }
-	@cp deploy/tgbridge.service $(UNITDIR)/ && $(SC) daemon-reload
-	@loginctl enable-linger $(USER) 2>/dev/null || echo "run: sudo loginctl enable-linger $(USER)  (keeps it running when you log out)"
-	@if grep -qE '^owner_id:[[:space:]]*"?[1-9]' $(CONF)/config.yaml; then \
-	  $(SC) enable $(UNIT) && $(MAKE) -s start; \
-	else \
-	  echo "owner_id not set. Run: $(BIN) whoami   then put owner_id in $(CONF)/config.yaml and run make setup again"; \
-	fi
+setup: build ## first-time install: build, then the tgbridge init wizard
+	@$(BIN) init
 
 hooks: ## optional: Claude Code hooks + MCP server in ~/.claude for telegram_send and Orca handoff (backup kept)
-	@$(BIN) install
+	$(call need,hooks install)
+	@$(BIN) hooks install
 
 unhooks: ## remove the handoff hooks + MCP server from ~/.claude
-	@$(BIN) uninstall
+	$(call need,hooks install)
+	@$(BIN) hooks uninstall
 
 doctor: ## check everything tgbridge needs
-	@ok(){ printf '  ok    %s\n' "$$1"; }; bad(){ printf '  FAIL  %s\n' "$$1"; }; \
-	$(SC) is-active -q $(UNIT) && ok "service running" || bad "service not running (tgb start; tgb logs-recent)"; \
-	[ "$$(loginctl show-user $(USER) -p Linger --value 2>/dev/null)" = yes ] && ok "linger on (survives logout)" || bad "linger off: sudo loginctl enable-linger $(USER)"; \
-	[ -x $(BIN) ] && ok "binary $$($(BIN) version)" || bad "no binary at $(BIN) (tgb build)"; \
-	[ -f $(CONF)/config.yaml ] && ok "config $(CONF)/config.yaml" || bad "no config (tgb setup)"; \
-	[ "$$(stat -c %a $(CONF)/token 2>/dev/null)" = 600 ] && ok "token file mode 600" || bad "token missing or not chmod 600"; \
-	command -v claude >/dev/null && ok "claude $$(claude --version 2>/dev/null | head -1)" || bad "claude not on PATH"; \
-	if grep -qE '^orca_enabled:[[:space:]]*true' $(CONF)/config.yaml 2>/dev/null; then \
-	  O=$$(grep -E '^orca_cli:' $(CONF)/config.yaml | awk '{print $$2}'); O=$${O:-$$HOME/.config/orca/cli/bin/orca}; O=$${O/#\~/$$HOME}; \
-	  [ -x "$$O" ] && ok "orca cli $$O" || bad "orca cli not found ($$O); orca_enabled needs it"; \
-	else echo "  info  Orca integration off (optional, orca_enabled)"; fi; \
-	[ -S "$${XDG_RUNTIME_DIR:-/run/user/$$(id -u)}/tgbridge.sock" ] && ok "socket present" || bad "socket missing (service down?)"; \
-	$(JC) -n 50 --no-pager | grep -q 'Threaded Mode is off' && bad "Threaded Mode off in BotFather" || ok "no Threaded Mode warning"; \
-	grep -q 'tgbridge hook' $(HOME)/.claude/settings.json 2>/dev/null && ok "handoff hooks installed" || echo "  info  handoff hooks not installed (tgb hooks)"
+	$(call need,doctor )
+	@$(BIN) doctor
 
 backup: ## archive config, token and state to ~/tgbridge-backup-<date>.tgz (for migration)
 	@umask 077 && tar czf $(HOME)/tgbridge-backup-$$(date +%Y%m%d-%H%M).tgz -C $(HOME) .config/tgbridge .local/state/tgbridge && ls -l $(HOME)/tgbridge-backup-*.tgz | tail -1
 
-uninstall: ## stop and remove the service and hooks (keeps config and state)
-	@$(SC) disable --now $(UNIT) 2>/dev/null; rm -f $(UNITDIR)/tgbridge.service; $(SC) daemon-reload
-	@$(BIN) uninstall 2>/dev/null || true
-	@echo "removed service and hooks; kept $(CONF) and $(STATE)"
+uninstall: ## remove the service and hooks (add --purge via the binary to delete config and data)
+	$(call need,--purge)
+	@$(BIN) uninstall

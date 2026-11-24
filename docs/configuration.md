@@ -1,14 +1,14 @@
 # Configuration
 
-**File:** `~/.config/tgbridge/config.yaml`, mode 600. `make setup` creates it from [`config.example.yaml`](../config.example.yaml).
+**File:** `~/.config/tgbridge/config.yaml`, mode 600. `tgbridge init` creates it from [`config.example.yaml`](../config.example.yaml).
 
 **Paths:** `~` is expanded. You can override the file location with `TGBRIDGE_CONFIG`.
 
-**After editing:** run `systemctl --user restart tgbridge` (or `make restart` in the repo). A typo or invalid value stops the service from starting, and `journalctl --user -u tgbridge -n 50` shows why.
+**After editing:** run `tgbridge service install`: it re-installs the service and restarts it (on Linux, `systemctl --user restart tgbridge` works too). A typo or invalid value stops the service from starting. `tgbridge doctor` shows the config error; the log has the detail (Linux: `journalctl --user -u tgbridge -n 50`, macOS: `~/Library/Logs/tgbridge.log`).
 
 | Setting | Default | What it does |
 |---|---|---|
-| `owner_id` | *(required)* | Your Telegram user ID; only this account can use the bot. Find it with `tgbridge whoami` (or `/whoami` once the bot runs). |
+| `owner_id` | *(required)* | Your Telegram user ID; only this account can use the bot. `tgbridge init` sets it; or find it with `tgbridge whoami` (or `/whoami` once the bot runs). |
 | `token_file` | `~/.config/tgbridge/token` | Bot token file. It must be mode 600. Alternatively set `TGBRIDGE_TOKEN`. |
 | `default_cwd` | `~` | The folder new sessions start in (`/new <path>` overrides it) |
 | `model` | Claude Code's default | `claude --model` for Telegram sessions, for example `sonnet` |

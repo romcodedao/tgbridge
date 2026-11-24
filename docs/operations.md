@@ -1,12 +1,27 @@
 # Operations
 
-**How it runs.** tgbridge is one binary, `~/.local/bin/tgbridge`, running as a **systemd user service** named `tgbridge`. Nothing runs as root. It long-polls Telegram, so it needs no open port. The Claude sessions it starts are its child processes.
+**How it runs.** tgbridge is one binary, `~/.local/bin/tgbridge`, running as a **systemd user service** named `tgbridge` (on macOS, a launchd agent named `io.github.romcodedao.tgbridge`; see [install](install.md#macos)). Nothing runs as root. It long-polls Telegram, so it needs no open port. The Claude sessions it starts are its child processes.
 
-**Running while logged out.** For it to keep running after you log out, *linger* must be on for your user (`tgb doctor` checks this).
+**Running while logged out.** For it to keep running after you log out, *linger* must be on for your user (Linux; `tgbridge doctor` checks this).
 
-## The `tgb` shortcut
+## The tgbridge commands
 
-All day-to-day commands are `make` targets in the repo's [`Makefile`](../Makefile). The alias runs them from any folder:
+These work on Linux and macOS, from any folder:
+
+| Command | What it does |
+|---|---|
+| `tgbridge doctor` | Check Claude, config, token, owner, service, linger (Linux), Orca, hooks. Says how to fix each problem. |
+| `tgbridge service status` | Manager, unit file, installed, active (exit 1 when not running) |
+| `tgbridge service install` | Write the service file and (re)start it. Use it to apply a config change. |
+| `tgbridge service uninstall` | Stop and remove the service |
+| `tgbridge init` | Set up or repair step by step; safe to re-run |
+| `tgbridge hooks install` / `uninstall` | Optional: the Claude Code hooks (Orca handoff) and the MCP server (`telegram_send`) in `~/.claude/settings.json` (a backup is kept) |
+| `tgbridge uninstall [--purge] [--yes] [--dry-run]` | Remove the service and hooks; `--purge` also deletes config, token, state, uploads, the macOS log and the binary ([details](install.md#uninstall)) |
+| `tgbridge version` | Installed version |
+
+## The `tgb` shortcut (source checkouts)
+
+Source installs also get `make` targets in the repo's [`Makefile`](../Makefile). The alias runs them from any folder:
 
 ```bash
 alias tgb='make -s -C ~/projects/tgbridge'     # optional, in ~/.bashrc; use the path of your checkout
@@ -17,21 +32,21 @@ Without the alias, use `make -s -C <checkout> <target>`, or `make <target>` insi
 | Command | What it does | Raw equivalent |
 |---|---|---|
 | `tgb` | List the commands | |
-| `tgb status` | Running? since when, memory, last log lines | `systemctl --user status tgbridge` |
-| `tgb doctor` | Check service, linger, binary, config, token mode, claude, orca, socket, Threaded Mode, hooks | |
-| `tgb logs` | Follow the log live (Ctrl+C quits) | `journalctl --user -u tgbridge -f` |
-| `tgb logs-recent` | Last 100 log lines | `journalctl --user -u tgbridge -n 100` |
-| `tgb errors` | Warnings and errors from the last 24 h | |
-| `tgb start` / `stop` / `restart` | Control the service | `systemctl --user start\|stop\|restart tgbridge` |
-| `tgb version` | Installed version (git commit) | `~/.local/bin/tgbridge version` |
+| `tgb status` | Running? (`tgbridge service status`) | `systemctl --user status tgbridge` |
+| `tgb doctor` | `tgbridge doctor` | |
+| `tgb logs` | Linux: follow the log live (Ctrl+C quits). On macOS: `tail -f ~/Library/Logs/tgbridge.log` | `journalctl --user -u tgbridge -f` |
+| `tgb logs-recent` | Linux: last 100 log lines | `journalctl --user -u tgbridge -n 100` |
+| `tgb errors` | Linux: warnings and errors from the last 24 h | |
+| `tgb start` / `stop` / `restart` | Linux: control the service | `systemctl --user start\|stop\|restart tgbridge` |
+| `tgb version` | Installed version (`git describe`: the tag, or `v0.0.0-<commit>` before the first one) | `~/.local/bin/tgbridge version` |
 | `tgb build` | Build the binary from the checkout | `go build -o ~/.local/bin/tgbridge ./cmd/tgbridge` |
 | `tgb deploy` | Build, then restart | |
 | `tgb update` | `git pull --ff-only`, run tests, build, restart | |
 | `tgb test` | Unit tests | `go test -race ./...` |
-| `tgb setup` | First install: config folder, systemd unit, linger; starts the service once `owner_id` is set (run it again after `tgbridge whoami`) | |
-| `tgb hooks` / `unhooks` | Optional: add or remove the Claude Code hooks (Orca handoff) and the MCP server (`telegram_send`) in `~/.claude/settings.json` (a backup is kept) | `tgbridge install` / `uninstall` |
+| `tgb setup` | Build, then `tgbridge init` (the wizard; safe to re-run) | |
+| `tgb hooks` / `unhooks` | Optional: add or remove the Claude Code hooks (Orca handoff) and the MCP server (`telegram_send`) in `~/.claude/settings.json` (a backup is kept) | `tgbridge hooks install` / `uninstall` |
 | `tgb backup` | Archive config, token and state to `~/tgbridge-backup-<date>.tgz` (mode 600) | |
-| `tgb uninstall` | Remove the service and hooks; config and state are kept | |
+| `tgb uninstall` | `tgbridge uninstall`: remove the service and hooks; config and state are kept (add `--purge` via the binary to delete them) | |
 
 **What a stop or restart does to sessions.** Running Claude turns end, but conversations are kept. The next message in a topic resumes its conversation. Unanswered permission prompts are marked expired.
 
@@ -42,30 +57,32 @@ Without the alias, use `make -s -C <checkout> <target>`, or `make <target>` insi
 | `~/.local/bin/tgbridge` | The binary | no (rebuilt) |
 | `~/.config/tgbridge/config.yaml` | Settings | yes |
 | `~/.config/tgbridge/token` | Bot token (mode 600) | yes |
-| `~/.config/systemd/user/tgbridge.service` | Service unit (copied from `deploy/`) | no (`tgb setup`) |
+| `~/.config/systemd/user/tgbridge.service` | Service unit (Linux; generated by `tgbridge service install`) | no |
+| `~/Library/LaunchAgents/io.github.romcodedao.tgbridge.plist` | launchd agent (macOS; same command) | no |
+| `~/Library/Logs/tgbridge.log` | Log (macOS) | no |
 | `~/.local/state/tgbridge/state.json` | Topics ↔ Claude sessions, handoffs | yes |
 | `~/.local/state/tgbridge/audit.log` | Every message and approval decision (JSON lines) | yes |
 | `~/.local/state/tgbridge/engine-*.json` | Generated Claude settings and MCP configs | regenerated |
 | `$XDG_RUNTIME_DIR/tgbridge.sock` | Local socket (only while running) | no |
-| `~/.claude/settings.json` | Holds the handoff hooks after `tgb hooks` | no |
+| `~/.claude/settings.json` | Holds the handoff hooks after `tgbridge hooks install` | no |
 | `~/.claude/projects/…` | Claude's own conversation transcripts (needed to resume) | Claude's data |
 
 ## Troubleshooting
 
 | Symptom | Check / fix |
 |---|---|
-| Bot doesn't answer | `tgb doctor`, then `tgb logs-recent`. Make sure you write from the `owner_id` account. |
+| Bot doesn't answer | `tgbridge doctor`, then the log (Linux: `tgb logs-recent`; macOS: `~/Library/Logs/tgbridge.log`). Make sure you write from the `owner_id` account. |
 | `getUpdates: request failed` now and then | A network blip; the poller retries on its own. Only a problem if it repeats nonstop. |
 | `getUpdates … 409 Conflict` | Two copies are running with the same token (for example, the old machine after a move). Stop one. |
-| `Threaded Mode is off` warning | Turn on BotFather → Mini App → Threads Settings → Threaded Mode, then `tgb restart` |
-| Every command gets denied / "unknown session" | Fixed in v1 (permissions are tied to the topic). Make sure you run the latest version: `tgb update`. |
+| `Threaded Mode is off` warning | Turn on BotFather → Mini App → Threads Settings → Threaded Mode, then `tgbridge service install` |
+| Every command gets denied / "unknown session" | Fixed in v1 (permissions are tied to the topic). Make sure you run the latest version: `tgb update` (source) or run the installer again. |
 | `⚠️ The Claude session crashed` | Send your message again; the conversation resumes. Repeated crashes: `tgb errors`. Check memory with `free -h`. |
-| Claude says it's not logged in | Run `claude` once in a terminal on the machine and log in, then `tgb restart`. |
-| `/sessions` shows `orca:` errors | Orca isn't running, or `orca_cli` is wrong (only with `orca_enabled: true`). `tgb doctor` shows the path it uses. |
-| Handoff does nothing | Check `orca_enabled: true`, run `tgb hooks`, then start a **new** Orca Claude session. Existing ones don't load the hooks. |
+| Claude says it's not logged in | Run `claude` once in a terminal on the machine and log in, then `tgbridge service install`. |
+| `/sessions` shows `orca:` errors | Orca isn't running, or `orca_cli` is wrong (only with `orca_enabled: true`). `tgbridge doctor` shows the path it uses. |
+| Handoff does nothing | Check `orca_enabled: true`, run `tgbridge hooks install`, then start a **new** Orca Claude session. Existing ones don't load the hooks. |
 | Service won't start after a config edit | `tgb logs-recent` shows the config error (for example `owner_id is required`). |
 
-## Limiting memory (optional)
+## Limiting memory (optional, Linux)
 
 To cap tgbridge and every Claude it starts:
 

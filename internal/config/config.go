@@ -90,7 +90,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if c.OwnerID == 0 {
-		return nil, errors.New("config: owner_id is required (run `tgbridge whoami` to find it)")
+		return nil, errors.New("config: owner_id is required (run `tgbridge init`, or find it with `tgbridge whoami`)")
 	}
 	return c, nil
 }

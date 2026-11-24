@@ -2,8 +2,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"log"
@@ -11,9 +13,13 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/romcodedao/tgbridge"
 	"github.com/romcodedao/tgbridge/internal/bot"
 	"github.com/romcodedao/tgbridge/internal/config"
 	"github.com/romcodedao/tgbridge/internal/engine"
@@ -23,6 +29,7 @@ import (
 	"github.com/romcodedao/tgbridge/internal/ipc"
 	"github.com/romcodedao/tgbridge/internal/mcp"
 	"github.com/romcodedao/tgbridge/internal/orca"
+	"github.com/romcodedao/tgbridge/internal/setup"
 	"github.com/romcodedao/tgbridge/internal/store"
 	"github.com/romcodedao/tgbridge/internal/telegram"
 )
@@ -31,10 +38,18 @@ var version = "dev"
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: tgbridge <command>
+  init [--no-service] set up (or repair) tgbridge step by step; safe to re-run
+  doctor              check the install and print how to fix each problem
+  service install|uninstall|status
+                      the background service (systemd user unit or launchd agent)
+  hooks install|uninstall
+                      register or remove the hooks and the MCP server with Claude Code
   serve               run the bridge (config: $TGBRIDGE_CONFIG or ~/.config/tgbridge/config.yaml)
   whoami              wait for a message to the bot and print the sender's user ID (for owner_id)
-  install             register hooks and the MCP server with Claude Code
-  uninstall           remove them
+  install             same as hooks install
+  uninstall [--purge] [--yes] [--dry-run]
+                      remove the service, hooks and MCP server; --purge also deletes config,
+                      token, state, logs, uploads and ~/.local/bin/tgbridge (--yes: no prompt)
   mcp                 stdio MCP server (started by Claude)
   hook <event>        Claude Code hook command
   version`)
@@ -87,7 +102,45 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "version":
-		fmt.Println(version)
+		fmt.Println(ver())
+	case "init":
+		noSvc := len(os.Args) > 2 && os.Args[2] == "--no-service"
+		if len(os.Args) > 2 && !noSvc {
+			usage()
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		in := bufio.NewReader(os.Stdin)
+		if err := setup.Init(ctx, env(), setup.Prompt{In: in, Out: os.Stdout, Secret: secret(in), Flush: flushInput}, noSvc); err != nil {
+			stop()
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+	case "doctor":
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		cs := setup.Doctor(ctx, env())
+		setup.Print(os.Stdout, cs)
+		if setup.Failed(cs) {
+			os.Exit(1)
+		}
+	case "service":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		os.Exit(service(os.Args[2]))
+	case "hooks":
+		if len(os.Args) < 3 {
+			usage()
+		}
+		switch os.Args[2] {
+		case "install":
+			hooksInstall()
+		case "uninstall":
+			hooksUninstall()
+		default:
+			usage()
+		}
 	case "serve":
 		if err := serve(); err != nil {
 			log.Fatal(err)
@@ -114,18 +167,124 @@ func main() {
 			return ipc.Call(ctx, sock, r)
 		}))
 	case "install":
-		if err := install.Install(claudeSettings(), self(), runClaude); err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("installed: hooks in ~/.claude/settings.json (backup: settings.json.tgbridge.bak) and user-scope MCP server 'tgbridge'")
+		hooksInstall()
 	case "uninstall":
-		if err := install.Uninstall(claudeSettings(), runClaude); err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("uninstalled")
+		os.Exit(uninstall(os.Args[2:]))
 	default:
 		usage()
 	}
+}
+
+func hooksInstall() {
+	if err := install.Install(claudeSettings(), self(), runClaude); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("installed: hooks in ~/.claude/settings.json (backup: settings.json.tgbridge.bak) and user-scope MCP server 'tgbridge'")
+}
+
+func hooksUninstall() {
+	if err := install.Uninstall(claudeSettings(), runClaude); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("uninstalled")
+}
+
+// ver is the release version, or the module version for `go install` builds.
+func ver() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && version == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return version
+}
+
+// run is setup's Runner; every child command gets at most 30s.
+func run(ctx context.Context, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return string(out), err
+}
+
+func env() setup.Env {
+	home, _ := os.UserHomeDir()
+	svc, svcErr := setup.ForOS(runtime.GOOS, home, run) // on error svc is nil and svcErr says why
+	return setup.Env{ConfigPath: configPath(), Home: home, GOOS: runtime.GOOS, Bin: self(), Version: ver(),
+		Example: tgbridge.ExampleConfig, Run: run, LookPath: exec.LookPath, Svc: svc, SvcErr: svcErr, ClaudeSettings: claudeSettings()}
+}
+
+// secret reads a line from in with terminal echo off; Ctrl+C (or TERM, HUP, QUIT) restores echo before exiting.
+func secret(in *bufio.Reader) func() (string, error) {
+	return func() (string, error) {
+		stty := func(arg string) {
+			c := exec.Command("stty", arg)
+			c.Stdin = os.Stdin
+			_ = c.Run() // not a terminal (piped input): nothing to hide
+		}
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+		done := make(chan struct{})
+		defer func() { signal.Stop(sig); close(done) }()
+		go func() {
+			select {
+			case <-sig:
+				stty("echo")
+				fmt.Println()
+				os.Exit(130)
+			case <-done:
+			}
+		}()
+		stty("-echo")
+		defer stty("echo")
+		line, err := in.ReadString('\n')
+		fmt.Println()
+		return strings.TrimSpace(line), err
+	}
+}
+
+// flushInput drops unread terminal input (keys typed or pasted ahead), only when stdin is a terminal.
+func flushInput() {
+	if st, err := os.Stdin.Stat(); err == nil && st.Mode()&os.ModeCharDevice != 0 {
+		flushTTY(uintptr(syscall.Stdin))
+	}
+}
+
+// service runs `tgbridge service <cmd>` and returns the exit code.
+func service(cmd string) int {
+	e, ctx := env(), context.Background()
+	if e.Svc == nil {
+		fmt.Fprintln(os.Stderr, e.SvcErr)
+		return 1
+	}
+	yes := map[bool]string{true: "yes", false: "no"}
+	switch cmd {
+	case "install":
+		claude, _ := exec.LookPath(e.ClaudeBin())
+		_ = e.Svc.Stop(ctx) // Install skips the restart of an unchanged running unit; this command must apply config changes
+		bak, err := e.Svc.Install(ctx, e.Bin, e.Version, setup.ServicePATH(claude), setup.ServiceEnv(e.ConfigPath))
+		if bak != "" {
+			fmt.Printf("previous unit saved to %s\n", bak)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Printf("installed and started: %s\n", e.Svc.Path())
+	case "uninstall":
+		if err := e.Svc.Uninstall(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Printf("removed: %s\n", e.Svc.Path())
+	case "status":
+		active := e.Svc.Active(ctx)
+		fmt.Printf("manager:   %s\nunit:      %s\ninstalled: %s\nactive:    %s\n", e.Svc.Name(), e.Svc.Path(), yes[e.Svc.Installed()], yes[active])
+		if !active {
+			return 1
+		}
+	default:
+		usage()
+	}
+	return 0
 }
 
 // whoami runs before owner_id is set, so it reads the config without that check.
@@ -231,9 +390,34 @@ func serve() error {
 		}
 	}()
 	go b.Run(ctx)
-	log.Printf("tgbridge %s serving @%s for owner %d", version, me.Username, cfg.OwnerID)
+	log.Printf("tgbridge %s serving @%s for owner %d", ver(), me.Username, cfg.OwnerID)
 	b.Updates(ctx, telegram.NewPoller(tg, 50))
 	log.Printf("shutting down")
 	mgr.Shutdown()
 	return nil
+}
+
+// uninstall runs `tgbridge uninstall` and returns the exit code.
+func uninstall(args []string) int {
+	fl := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	purge := fl.Bool("purge", false, "also delete config, token, state, logs, uploads and ~/.local/bin/tgbridge")
+	yes := fl.Bool("yes", false, "don't ask before --purge deletes")
+	dry := fl.Bool("dry-run", false, "print the plan and change nothing")
+	if fl.Parse(args) != nil || fl.NArg() > 0 {
+		usage()
+	}
+	cfg, err := config.Read(configPath())
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			fmt.Printf("note: %v; using default paths\n", err)
+		}
+		cfg = config.Defaults()
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := setup.RunUninstall(ctx, env(), cfg, setup.UninstallOpts{Purge: *purge, Yes: *yes, DryRun: *dry}, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
 }

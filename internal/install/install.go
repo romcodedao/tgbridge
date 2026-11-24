@@ -53,8 +53,8 @@ func save(path string, m map[string]any) error {
 	return os.Rename(tmp, path)
 }
 
-// strip removes tgbridge's entries from every event, dropping events left empty.
-func strip(hooks map[string]any) {
+// strip removes tgbridge's entries from every event, dropping events left empty; it reports whether it removed any.
+func strip(hooks map[string]any) (removed bool) {
 	for _, ev := range order {
 		list, _ := hooks[ev].([]any)
 		var keep []any
@@ -63,12 +63,17 @@ func strip(hooks map[string]any) {
 				keep = append(keep, e)
 			}
 		}
+		if len(keep) == len(list) {
+			continue // nothing of ours: leave the event exactly as it is
+		}
+		removed = true
 		if len(keep) == 0 {
 			delete(hooks, ev)
 		} else {
 			hooks[ev] = keep
 		}
 	}
+	return removed
 }
 
 // Install appends `<bin> hook <Event>` entries to settingsPath (idempotent, backup kept) and runs
@@ -100,20 +105,23 @@ func Install(settingsPath, bin string, run func(args ...string) error) error {
 	return run("mcp", "add", "--scope", "user", "tgbridge", "--", bin, "mcp")
 }
 
-// Uninstall removes only tgbridge's hooks and MCP server.
+// Uninstall removes only tgbridge's hooks and MCP server; a missing settings file stays missing.
 func Uninstall(settingsPath string, run func(args ...string) error) error {
-	m, _, err := load(settingsPath)
+	m, orig, err := load(settingsPath)
 	if err != nil {
 		return err
 	}
-	if hooks, ok := m["hooks"].(map[string]any); ok {
-		strip(hooks)
+	if orig == nil {
+		run("mcp", "remove", "--scope", "user", "tgbridge")
+		return nil
+	}
+	if hooks, ok := m["hooks"].(map[string]any); ok && strip(hooks) {
 		if len(hooks) == 0 {
 			delete(m, "hooks")
 		}
-	}
-	if err := save(settingsPath, m); err != nil {
-		return err
+		if err := save(settingsPath, m); err != nil {
+			return err
+		}
 	}
 	run("mcp", "remove", "--scope", "user", "tgbridge")
 	return nil
