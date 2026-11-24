@@ -1,5 +1,10 @@
 # tgbridge
 
+[![CI](https://github.com/romcodedao/tgbridge/actions/workflows/ci.yml/badge.svg)](https://github.com/romcodedao/tgbridge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/romcodedao/tgbridge)](https://github.com/romcodedao/tgbridge/releases)
+[![License](https://img.shields.io/github/license/romcodedao/tgbridge)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/romcodedao/tgbridge)](https://goreportcard.com/report/github.com/romcodedao/tgbridge)
+
 Drive real Claude Code sessions from a private Telegram chat: one topic per session, live streaming with thinking, and permission prompts as buttons.
 
 It runs the `claude` CLI already installed on your machine, as a `systemd --user` service. Only your Telegram account can use it. It long-polls Telegram, so it needs no open port.
