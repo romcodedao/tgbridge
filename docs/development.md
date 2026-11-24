@@ -29,6 +29,8 @@ CI runs `go vet`, `go test -race` and [golangci-lint](https://golangci-lint.run/
 
 ## Release
 
-Push a tag like `v0.2.0` on `main`. The release workflow runs the tests, then [GoReleaser](https://goreleaser.com/) (`.goreleaser.yaml`) builds linux and darwin, amd64 and arm64 archives and publishes a GitHub release. Try it locally with `goreleaser release --snapshot --clean`.
+A Conventional Commit on `main` (`feat:`, `fix:`, ...) makes [release-please](https://github.com/googleapis/release-please) open or update a release PR. Merging it creates the tag, the GitHub release and `CHANGELOG.md`. In the same workflow run, [GoReleaser](https://goreleaser.com/) (`.goreleaser.yaml`) then builds linux and darwin, amd64 and arm64 archives, uploads them with `checksums.txt` and attests their build provenance. Verify a download with `gh attestation verify <file> -R romcodedao/tgbridge`.
+
+The release PR is opened with `GITHUB_TOKEN`, so CI does not run on it. Try the build locally with `goreleaser release --snapshot --clean`.
 
 To update a source install: `make update` in the checkout.
