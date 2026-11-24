@@ -38,7 +38,7 @@ Without the alias, use `make -s -C <checkout> <target>`, or `make <target>` insi
 | `tgb logs-recent` | Linux: last 100 log lines | `journalctl --user -u tgbridge -n 100` |
 | `tgb errors` | Linux: warnings and errors from the last 24 h | |
 | `tgb start` / `stop` / `restart` | Linux: control the service | `systemctl --user start\|stop\|restart tgbridge` |
-| `tgb version` | Installed version (git commit) | `~/.local/bin/tgbridge version` |
+| `tgb version` | Installed version (`git describe`: the tag, or `v0.0.0-<commit>` before the first one) | `~/.local/bin/tgbridge version` |
 | `tgb build` | Build the binary from the checkout | `go build -o ~/.local/bin/tgbridge ./cmd/tgbridge` |
 | `tgb deploy` | Build, then restart | |
 | `tgb update` | `git pull --ff-only`, run tests, build, restart | |

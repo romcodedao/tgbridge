@@ -4,9 +4,12 @@
 SHELL   := /bin/bash
 BIN     ?= $(HOME)/.local/bin/tgbridge
 UNIT    := tgbridge
-VERSION := $(shell git -C $(CURDIR) describe --always --dirty 2>/dev/null || echo dev)
+# v-prefixed like release builds and go install: a tag (v0.1.0-3-gabc1234), else v0.0.0-<commit>
+VERSION := $(shell git -C $(CURDIR) describe --tags --match 'v[0-9]*' --dirty 2>/dev/null || echo v0.0.0-$$(git -C $(CURDIR) describe --always --dirty 2>/dev/null || echo dev))
 SC      := systemctl --user
 JC      := journalctl --user -u $(UNIT)
+# need fails unless the installed binary's usage mentions $(1): a binary older than this checkout lacks the subcommand
+need     = @$(BIN) 2>&1 | grep -q -- '$(1)' || { echo "the installed binary is older than this checkout: run make build (or make setup) first" >&2; exit 1; }
 
 .DEFAULT_GOAL := help
 .PHONY: help status logs logs-recent errors start stop restart build test deploy update setup hooks unhooks doctor backup uninstall version
@@ -15,6 +18,7 @@ help: ## list commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | awk -F'\t' '{printf "  %-12s %s\n", $$1, $$2}'
 
 status: ## is it running? (service status)
+	$(call need,service install)
 	@$(BIN) service status
 
 logs: ## follow the log live (Ctrl+C to quit)
@@ -53,16 +57,20 @@ setup: build ## first-time install: build, then the tgbridge init wizard
 	@$(BIN) init
 
 hooks: ## optional: Claude Code hooks + MCP server in ~/.claude for telegram_send and Orca handoff (backup kept)
+	$(call need,hooks install)
 	@$(BIN) hooks install
 
 unhooks: ## remove the handoff hooks + MCP server from ~/.claude
+	$(call need,hooks install)
 	@$(BIN) hooks uninstall
 
 doctor: ## check everything tgbridge needs
+	$(call need,doctor )
 	@$(BIN) doctor
 
 backup: ## archive config, token and state to ~/tgbridge-backup-<date>.tgz (for migration)
 	@umask 077 && tar czf $(HOME)/tgbridge-backup-$$(date +%Y%m%d-%H%M).tgz -C $(HOME) .config/tgbridge .local/state/tgbridge && ls -l $(HOME)/tgbridge-backup-*.tgz | tail -1
 
 uninstall: ## remove the service and hooks (add --purge via the binary to delete config and data)
+	$(call need,--purge)
 	@$(BIN) uninstall
