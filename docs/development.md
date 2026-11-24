@@ -29,12 +29,12 @@ CI runs `go vet`, `go test -race` and [golangci-lint](https://golangci-lint.run/
 
 ## Release
 
-A Conventional Commit on `main` (`feat:`, `fix:`, ...) makes [release-please](https://github.com/googleapis/release-please) open or update a release PR. Merging it creates the tag, a **draft** GitHub release and `CHANGELOG.md`. In the same workflow run, the tests run again, then [GoReleaser](https://goreleaser.com/) (`.goreleaser.yaml`) builds linux and darwin, amd64 and arm64 archives and uploads them with `checksums.txt` to the draft. The workflow then attests their build provenance and publishes the release.
+A Conventional Commit on `main` (`feat:`, `fix:`, ...) makes [release-please](https://github.com/googleapis/release-please) open or update a release PR. Merging it creates the tag, a **draft** GitHub release and `CHANGELOG.md`. In the same workflow run, the tests run again, then [GoReleaser](https://goreleaser.com/) (`.goreleaser.yaml`) builds linux and darwin, amd64 and arm64 archives and uploads them with `checksums.txt` to the draft. The workflow then attests their build provenance and publishes the release. Verify a download with `gh attestation verify <file> -R romcodedao/tgbridge`.
 
 If that job fails, the release stays a draft:
 
 - **Transient failure** (network, GitHub outage): re-run the failed job (Actions → Release → Re-run failed jobs). A re-run builds the same tag with that tag's workflow, so it can't pick up fixes.
-- **Code or workflow failure**: land the fix on `main` as a `fix:` commit; its release PR releases the next version. Then delete the stale draft and its tag: `gh release delete vX.Y.Z --cleanup-tag`. Verify a download with `gh attestation verify <file> -R romcodedao/tgbridge`.
+- **Code or workflow failure**: land the fix on `main` as a `fix:` commit; its release PR releases the next version. Once that next version is published, delete the stale draft and its tag: `gh release delete vX.Y.Z --cleanup-tag`.
 
 The release PR is opened with `GITHUB_TOKEN`, so CI does not run on it. Try the build locally with `goreleaser release --snapshot --clean`.
 
