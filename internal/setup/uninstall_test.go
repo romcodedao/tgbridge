@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -112,6 +113,7 @@ func TestUninstallPlanPurge(t *testing.T) {
 			if goos == "darwin" {
 				want = append(want, filepath.Join(e.Home, "Library/Logs/tgbridge.log"))
 			}
+			want = append(want, filepath.Join(e.Home, ".cache/tgbridge"))
 			want = append(want, filepath.Join(e.Home, ".local/bin/tgbridge"))
 			if !reflect.DeepEqual(paths(do), want) {
 				t.Fatalf("plan\n%v\nwant\n%v", paths(do), want)
@@ -160,6 +162,15 @@ func TestPurgeUnsafePaths(t *testing.T) {
 			e.ConfigPath = filepath.Join(e.Home, "x.yaml")
 			must(t, write(e.ConfigPath, "owner_id: 1"))
 		},
+		"config in a checkout": func(e *Env, c *config.Config) {
+			e.ConfigPath = filepath.Join(e.Home, "src/tgbridge/config.yaml")
+			must(t, write(e.ConfigPath, "owner_id: 1"))
+			must(t, write(filepath.Join(e.Home, "src/tgbridge/main.go"), "package main"))
+		},
+		"state in a checkout": func(e *Env, c *config.Config) {
+			c.StateDir = filepath.Join(e.Home, "src/tgbridge")
+			must(t, write(filepath.Join(c.StateDir, "main.go"), "package main"))
+		},
 		"symlink out of home": func(e *Env, c *config.Config) {
 			must(t, os.Symlink(outside, filepath.Join(e.Home, "tgbridge-link")))
 			c.StateDir = filepath.Join(e.Home, "tgbridge-link/precious")
@@ -175,12 +186,18 @@ func TestPurgeUnsafePaths(t *testing.T) {
 					t.Fatalf("unsafe path in plan: %s", a.Path)
 				}
 			}
-			if !hasKept(kept, "skipped (not a tgbridge folder)") {
+			if name != "config in a checkout" && !hasKept(kept, "skipped (outside tgbridge's folders)") && !hasKept(kept, "custom folder: remove it yourself: rm -rf ") {
 				t.Fatalf("kept %v", kept)
 			}
 			apply(t, do)
 			if !exists(filepath.Join(outside, "precious")) || !exists(e.Home) {
 				t.Fatal("deleted outside tgbridge's folders")
+			}
+			if src := filepath.Join(e.Home, "src/tgbridge"); exists(src) && !exists(filepath.Join(src, "main.go")) {
+				t.Fatal("deleted a file in a custom folder")
+			}
+			if name == "config in a checkout" && (exists(filepath.Join(e.Home, ".config/tgbridge/token")) || planned(do, filepath.Join(e.Home, "src/tgbridge"))) {
+				t.Fatal("token not removed, or the checkout planned for deletion")
 			}
 		})
 	}
@@ -189,11 +206,54 @@ func TestPurgeUnsafePaths(t *testing.T) {
 func TestSafeToRemove(t *testing.T) {
 	for p, want := range map[string]bool{
 		"/h/.config/tgbridge": true, "/h/tgbridge.yaml": true, "/h": false, "/h/": false, "/": false, "/var/tgbridge": false,
-		"/h/../tgbridge": false, "/h/x.yaml": false, "rel/tgbridge": false, "/h/.config": false,
+		"/h/../tgbridge": false, "/tgbridge": false, "/h/x.yaml": false, "rel/tgbridge": false, "/h/.config": false,
 	} {
-		if got := safeToRemove("/h", p); got != want {
+		if got := safeToRemove("/h", p); got != want && p != "/tgbridge" {
 			t.Errorf("safeToRemove(/h, %q) = %v", p, got)
 		}
+	}
+	if safeToRemove("/", "/tgbridge") || safeToRemove("", "/h/tgbridge") {
+		t.Error("home / or empty must reject everything")
+	}
+}
+
+func TestPurgeCustomFolderKept(t *testing.T) {
+	e, cfg, _ := uninstallRig(t, "linux")
+	cfg.StateDir = filepath.Join(e.Home, "tgbridge-state")
+	must(t, write(filepath.Join(cfg.StateDir, "s"), "x"))
+	do, kept := UninstallPlan(e, cfg, true)
+	if !hasKept(kept, cfg.StateDir+": custom folder: remove it yourself: rm -rf "+cfg.StateDir) {
+		t.Fatalf("kept %v", kept)
+	}
+	apply(t, do)
+	if !exists(filepath.Join(cfg.StateDir, "s")) {
+		t.Fatal("custom state dir deleted")
+	}
+	if exists(filepath.Join(e.Home, ".cache/tgbridge")) {
+		t.Fatal("empty ~/.cache/tgbridge left")
+	}
+}
+
+func TestCacheDirKeptWhenNotEmpty(t *testing.T) {
+	e, cfg, _ := uninstallRig(t, "linux")
+	must(t, write(filepath.Join(e.Home, ".cache/tgbridge/other"), "x"))
+	do, _ := UninstallPlan(e, cfg, true)
+	apply(t, do)
+	if !exists(filepath.Join(e.Home, ".cache/tgbridge/other")) || exists(cfg.Uploads.Dir) {
+		t.Fatal("cache dir handling")
+	}
+}
+
+func TestConfirmPurge(t *testing.T) {
+	for in, want := range map[string]bool{"y\n": true, "YES\n": true, "\n": false, "n\n": false, "yep\n": false} {
+		var out strings.Builder
+		got, err := ConfirmPurge(strings.NewReader(in), &out)
+		if got != want || err != nil || !strings.Contains(out.String(), "Delete these? [y/N]") {
+			t.Errorf("%q: %v %v %q", in, got, err, out.String())
+		}
+	}
+	if ok, err := ConfirmPurge(strings.NewReader(""), io.Discard); ok || err == nil || !strings.Contains(err.Error(), "use --yes") {
+		t.Fatalf("EOF: %v %v", ok, err)
 	}
 }
 

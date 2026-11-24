@@ -1,7 +1,11 @@
 package setup
 
 import (
+	"bufio"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,11 +20,13 @@ type Action struct {
 	Do         func(ctx context.Context) error
 }
 
-const skipped = "skipped (not a tgbridge folder)"
+const skipped = "skipped (outside tgbridge's folders)"
 
-// safeToRemove holds when p is strictly under home and its path below home names tgbridge.
+type item struct{ what, path, def string }
+
+// safeToRemove holds when p is strictly under home (not "/") and its path below home names tgbridge.
 func safeToRemove(home, p string) bool {
-	if !filepath.IsAbs(home) || !filepath.IsAbs(p) {
+	if !filepath.IsAbs(home) || !filepath.IsAbs(p) || filepath.Clean(home) == "/" {
 		return false
 	}
 	rel, err := filepath.Rel(filepath.Clean(home), filepath.Clean(p))
@@ -45,24 +51,29 @@ func UninstallPlan(e Env, cfg *config.Config, purge bool) (do []Action, kept []s
 		kept = append(kept, bak+" (your Claude settings from before tgbridge)")
 	}
 
-	conf := filepath.Dir(e.ConfigPath)
-	if !safeToRemove(e.Home, conf) { // e.g. TGBRIDGE_CONFIG=~/x.yaml: the dir is home itself
-		conf = e.ConfigPath
+	// Folders are deleted only at tgbridge's default locations: a custom state_dir may be a checkout or the like.
+	defConf := filepath.Join(e.Home, ".config/tgbridge")
+	defState := filepath.Join(e.Home, ".local/state/tgbridge")
+	defUploads := filepath.Join(e.Home, ".cache/tgbridge/uploads")
+	conf := item{"config", e.ConfigPath, ""}
+	if filepath.Clean(filepath.Dir(e.ConfigPath)) == defConf {
+		conf = item{"config", defConf, defConf}
 	}
-	items := [][2]string{{"config", conf}, {"token", cfg.TokenFile}, {"state", cfg.StateDir}, {"uploads", cfg.Uploads.Dir}}
+	items := []item{conf, {"token", cfg.TokenFile, ""}, {"state", cfg.StateDir, defState}, {"uploads", cfg.Uploads.Dir, defUploads}}
 	if e.GOOS == "darwin" {
-		items = append(items, [2]string{"log", filepath.Join(e.Home, "Library/Logs/tgbridge.log")})
+		items = append(items, item{"log", filepath.Join(e.Home, "Library/Logs/tgbridge.log"), ""})
 	}
 	if !purge {
-		for _, it := range append(items, [2]string{"binary", e.Bin}) {
-			if it[1] != "" && lexists(it[1]) {
-				kept = append(kept, it[1]+" ("+it[0]+")")
+		for _, it := range append(items, item{"binary", e.Bin, ""}) {
+			if it.path != "" && lexists(it.path) {
+				kept = append(kept, it.path+" ("+it.what+")")
 			}
 		}
 		return do, kept
 	}
 
-	rm := func(p string) {
+	// rm plans deleting p; def != "" marks a folder, deleted only when p is that default.
+	rm := func(p, def string) {
 		if p == "" {
 			return
 		}
@@ -79,6 +90,10 @@ func UninstallPlan(e Env, cfg *config.Config, purge bool) (do []Action, kept []s
 		if !lexists(p) {
 			return
 		}
+		if def != "" && p != def {
+			kept = append(kept, p+": custom folder: remove it yourself: rm -rf "+p)
+			return
+		}
 		// Check again with symlinks resolved, so a tgbridge-named link can't lead out of home.
 		home, err1 := filepath.EvalSymlinks(e.Home)
 		dir, err2 := filepath.EvalSymlinks(filepath.Dir(p))
@@ -89,7 +104,12 @@ func UninstallPlan(e Env, cfg *config.Config, purge bool) (do []Action, kept []s
 		do = append(do, Action{"delete " + p, p, func(context.Context) error { return os.RemoveAll(p) }})
 	}
 	for _, it := range items {
-		rm(it[1])
+		rm(it.path, it.def)
+	}
+	// ~/.cache/tgbridge goes too when the uploads folder is all it holds.
+	cache := filepath.Dir(defUploads)
+	if ents, err := os.ReadDir(cache); err == nil && len(ents) == 1 && ents[0].Name() == "uploads" && planned(do, defUploads) {
+		do = append(do, Action{"delete " + cache, cache, func(context.Context) error { return os.Remove(cache) }})
 	}
 
 	// Only the binary install.sh or the release tarball put in ~/.local/bin; go install, brew etc. are the user's.
@@ -100,9 +120,30 @@ func UninstallPlan(e Env, cfg *config.Config, purge bool) (do []Action, kept []s
 	}
 	realBin, _ := filepath.EvalSymlinks(bin)
 	if real == bin || real != "" && real == realBin {
-		rm(bin)
+		rm(bin, "")
 	} else if e.Bin != "" && lexists(e.Bin) {
 		kept = append(kept, e.Bin+": remove it yourself: rm "+e.Bin)
 	}
 	return do, kept
+}
+
+func planned(do []Action, p string) bool {
+	for _, a := range do {
+		if a.Path == p {
+			return true
+		}
+	}
+	return false
+}
+
+// ConfirmPurge asks before --purge deletes; only "y" or "yes" proceeds, and no answer at all is an error.
+func ConfirmPurge(in io.Reader, out io.Writer) (bool, error) {
+	fmt.Fprint(out, "Delete these? [y/N] ")
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && line == "" {
+		fmt.Fprintln(out)
+		return false, errors.New("no answer: use --yes to purge without a prompt")
+	}
+	a := strings.ToLower(strings.TrimSpace(line))
+	return a == "y" || a == "yes", nil
 }

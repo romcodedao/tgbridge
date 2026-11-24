@@ -395,6 +395,10 @@ func uninstall(args []string) int {
 		usage()
 	}
 	e := env()
+	if e.Home == "" {
+		fmt.Fprintln(os.Stderr, "error: can't find your home folder (set HOME); nothing changed")
+		return 1
+	}
 	cfg, err := config.Read(e.ConfigPath)
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
@@ -427,13 +431,12 @@ func uninstall(args []string) int {
 			fmt.Fprintln(os.Stderr, "aborted: no terminal to confirm the deletes; use --yes")
 			return 1
 		}
-		fmt.Print("Delete these? [y/N] ")
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		ok, err := setup.ConfirmPurge(os.Stdin, os.Stdout)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "\naborted: no answer; use --yes")
+			fmt.Fprintln(os.Stderr, "aborted:", err)
 			return 1
 		}
-		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+		if !ok {
 			fmt.Println("aborted: nothing changed")
 			return 1
 		}
