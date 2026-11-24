@@ -20,6 +20,13 @@ import (
 // fakeRelease serves a v0.1.0 archive whose "binary" is a shell script over TLS; sum overrides the checksum.
 // It returns the env that points install.sh at it and makes curl trust its certificate.
 func fakeRelease(t *testing.T, sum string) []string {
+	srv := httptest.NewTLSServer(releaseMux(t, sum))
+	t.Cleanup(srv.Close)
+	return append(trustTLS(t, srv), "TGBRIDGE_BASE_URL="+srv.URL)
+}
+
+// releaseMux serves the v0.1.0 archive and its checksums.txt.
+func releaseMux(t *testing.T, sum string) http.Handler {
 	t.Helper()
 	body := []byte("#!/bin/sh\necho \"init ran\"\n")
 	var buf bytes.Buffer
@@ -41,9 +48,7 @@ func fakeRelease(t *testing.T, sum string) []string {
 		// a longer name with the archive's prefix comes first: only the exact name may match
 		fmt.Fprintf(w, "%s  %s.sbom.json\n%s  other.tar.gz\n%s  %s\n", strings.Repeat("0", 64), name, strings.Repeat("0", 64), sum, name)
 	})
-	srv := httptest.NewTLSServer(mux)
-	t.Cleanup(srv.Close)
-	return append(trustTLS(t, srv), "TGBRIDGE_BASE_URL="+srv.URL)
+	return mux
 }
 
 // trustTLS writes srv's certificate to a file and returns the env that makes curl trust it.
@@ -130,14 +135,14 @@ func TestInstallScriptTruncated(t *testing.T) {
 }
 
 func TestInstallScriptRefusesHTTP(t *testing.T) {
-	plain := httptest.NewServer(http.NotFoundHandler())
+	plain := httptest.NewServer(releaseMux(t, "")) // a complete, valid release, but over http
 	t.Cleanup(plain.Close)
 	dir, out, err := runInstall(t, "install.sh", []string{"TGBRIDGE_BASE_URL=" + plain.URL, "TGBRIDGE_NO_INIT=1"})
 	if err == nil || installed(dir) || !strings.Contains(out, "TGBRIDGE_BASE_URL must start with https://") {
 		t.Fatalf("an http base URL must be refused: %v\n%s", err, out)
 	}
 
-	// an https server that redirects to http: curl must not follow it
+	// an https server that redirects to the http release: curl must not follow it
 	redir := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusFound)
 	}))

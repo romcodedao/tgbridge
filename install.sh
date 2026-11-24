@@ -73,7 +73,8 @@ main() {
 
   tmp=$(mktemp -d) # global, so the EXIT trap still sees it after main returns
   trap 'rm -rf "$tmp"' EXIT
-  trap 'exit 130' INT TERM
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   echo "Downloading tgbridge $tag ($os/$arch)"
   curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$archive" "$base/download/$tag/$archive" || die "download failed: $base/download/$tag/$archive"

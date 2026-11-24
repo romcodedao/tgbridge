@@ -9,7 +9,7 @@ VERSION := $(shell git -C $(CURDIR) describe --tags --match 'v[0-9]*' --dirty 2>
 SC      := systemctl --user
 JC      := journalctl --user -u $(UNIT)
 # need fails unless the installed binary's usage mentions $(1): a binary older than this checkout lacks the subcommand
-need     = @$(BIN) 2>&1 | grep -q -- '$(1)' || { echo "the installed binary is older than this checkout: run make build (or make setup) first" >&2; exit 1; }
+need     = @[ -x "$(BIN)" ] || { echo "tgbridge is not installed: run make setup" >&2; exit 1; }; $(BIN) 2>&1 | grep -q -- '$(1)' || { echo "the installed binary is older than this checkout: run make build (or make setup) first" >&2; exit 1; }
 
 .DEFAULT_GOAL := help
 .PHONY: help status logs logs-recent errors start stop restart build test deploy update setup hooks unhooks doctor backup uninstall version
