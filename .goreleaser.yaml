@@ -25,9 +25,15 @@ checksum:
   name_template: checksums.txt
 
 release:
-  # release-please creates a draft with the notes; this uploads the assets and publishes it
+  # release-please creates a draft release with the notes; goreleaser uploads the assets to it
+  # and leaves it a draft. The workflow publishes it after attesting the assets.
   use_existing_draft: true
+  # must equal release-please's release name (v<version>, no component), or goreleaser
+  # won't find the draft and creates a second release
+  name_template: "{{ .Tag }}"
+  draft: true
   mode: keep-existing
+  replace_existing_artifacts: true # a re-run after a partial upload would fail with 422
 
 changelog:
   disable: true
