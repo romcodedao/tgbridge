@@ -20,6 +20,7 @@ Code layout and test notes: [docs/development.md](docs/development.md).
 - New behaviour has a test. A bug fix has a test that failed before the fix.
 - Keep the change small and on one topic. Don't add dependencies for a few lines of code.
 - Commit messages and the PR title follow [Conventional Commits](https://www.conventionalcommits.org/): `feat: …`, `fix: …`, `docs: …`, `chore: …`.
+- PRs are squash-merged, so the PR title becomes the commit and the changelog line. A check enforces the Conventional Commits format on it.
 - Never commit a bot token, a chat or user ID, or paths from your own machine. Use placeholders like `123456789`.
 
 ## Security issues
