@@ -399,66 +399,18 @@ func uninstall(args []string) int {
 	if fl.Parse(args) != nil || fl.NArg() > 0 {
 		usage()
 	}
-	e := env()
-	if e.Home == "" {
-		fmt.Fprintln(os.Stderr, "error: can't find your home folder (set HOME); nothing changed")
-		return 1
-	}
-	cfg, err := config.Read(e.ConfigPath)
+	cfg, err := config.Read(configPath())
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			fmt.Printf("note: %v; using default paths\n", err)
 		}
 		cfg = config.Defaults()
 	}
-	do, kept := setup.UninstallPlan(e, cfg, *purge)
-	list := func(title string, items []string) {
-		fmt.Println(title)
-		if len(items) == 0 {
-			fmt.Println("  (nothing)")
-		}
-		for _, s := range items {
-			fmt.Println("  " + s)
-		}
-	}
-	var plan []string
-	for _, a := range do {
-		plan = append(plan, a.Desc)
-	}
-	list("Plan:", plan)
-	if *dry {
-		list("Kept:", kept)
-		fmt.Println("dry run: nothing changed")
-		return 0
-	}
-	if *purge && !*yes {
-		if st, err := os.Stdin.Stat(); err != nil || st.Mode()&os.ModeCharDevice == 0 {
-			fmt.Fprintln(os.Stderr, "aborted: no terminal to confirm the deletes; use --yes")
-			return 1
-		}
-		ok, err := setup.ConfirmPurge(os.Stdin, os.Stdout)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "aborted:", err)
-			return 1
-		}
-		if !ok {
-			fmt.Println("aborted: nothing changed")
-			return 1
-		}
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	var removed []string
-	code := 0
-	for _, a := range do {
-		if err := a.Do(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %s: %v\n", a.Desc, err)
-			code = 1
-			continue
-		}
-		removed = append(removed, a.Desc)
+	if err := setup.RunUninstall(ctx, env(), cfg, setup.UninstallOpts{Purge: *purge, Yes: *yes, DryRun: *dry}, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
-	list("Removed:", removed)
-	list("Kept:", kept)
-	return code
+	return 0
 }

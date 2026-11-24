@@ -104,6 +104,12 @@ func UninstallPlan(e Env, cfg *config.Config, purge bool) (do []Action, kept []s
 		do = append(do, Action{"delete " + p, p, func(context.Context) error { return os.RemoveAll(p) }})
 	}
 	for _, it := range items {
+		if it.what == "config" && it.def == "" { // a config at a custom path is the user's file, wherever it is
+			if lexists(it.path) {
+				kept = append(kept, it.path+": custom config: remove it yourself: rm "+it.path)
+			}
+			continue
+		}
 		rm(it.path, it.def)
 	}
 	// ~/.cache/tgbridge goes too when the uploads folder is all it holds.
@@ -139,6 +145,66 @@ func planned(do []Action, p string) bool {
 		}
 	}
 	return false
+}
+
+// UninstallOpts are the flags of tgbridge uninstall.
+type UninstallOpts struct{ Purge, Yes, DryRun bool }
+
+// RunUninstall prints the plan and carries it out: tgbridge uninstall. --purge asks first on a terminal unless Yes is set.
+func RunUninstall(ctx context.Context, e Env, cfg *config.Config, o UninstallOpts, in io.Reader, out io.Writer) error {
+	if e.Home == "" {
+		return errors.New("error: can't find your home folder (set HOME); nothing changed")
+	}
+	do, kept := UninstallPlan(e, cfg, o.Purge)
+	list := func(title string, items []string) {
+		fmt.Fprintln(out, title)
+		if len(items) == 0 {
+			fmt.Fprintln(out, "  (nothing)")
+		}
+		for _, s := range items {
+			fmt.Fprintln(out, "  "+s)
+		}
+	}
+	var plan []string
+	for _, a := range do {
+		plan = append(plan, a.Desc)
+	}
+	list("Plan:", plan)
+	if o.DryRun {
+		list("Kept:", kept)
+		fmt.Fprintln(out, "dry run: nothing changed")
+		return nil
+	}
+	if o.Purge && !o.Yes {
+		if f, ok := in.(*os.File); ok {
+			if st, err := f.Stat(); err != nil || st.Mode()&os.ModeCharDevice == 0 {
+				return errors.New("aborted: no terminal to confirm the deletes; use --yes")
+			}
+		}
+		ok, err := ConfirmPurge(in, out)
+		if err != nil {
+			return fmt.Errorf("aborted: %w", err)
+		}
+		if !ok {
+			return errors.New("aborted: nothing changed")
+		}
+	}
+	var removed []string
+	failed := false
+	for _, a := range do {
+		if err := a.Do(ctx); err != nil {
+			fmt.Fprintf(out, "error: %s: %v\n", a.Desc, err)
+			failed = true
+			continue
+		}
+		removed = append(removed, a.Desc)
+	}
+	list("Removed:", removed)
+	list("Kept:", kept)
+	if failed {
+		return errors.New("error: some steps failed (see above)")
+	}
+	return nil
 }
 
 // ConfirmPurge asks before --purge deletes; only "y" or "yes" proceeds, and no answer at all is an error.

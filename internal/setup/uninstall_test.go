@@ -2,7 +2,9 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/romcodedao/tgbridge/internal/config"
+	"github.com/romcodedao/tgbridge/internal/install"
 )
 
 const ourHooks = `{"model":"opus","hooks":{"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"/b/tgbridge hook Stop"}]}]}}`
@@ -190,7 +193,7 @@ func TestPurgeUnsafePaths(t *testing.T) {
 					t.Fatalf("unsafe path in plan: %s", a.Path)
 				}
 			}
-			if name != "config in a checkout" && !hasKept(kept, "skipped (outside tgbridge's folders)") && !hasKept(kept, "custom folder: remove it yourself: rm -rf ") {
+			if name != "config in a checkout" && !hasKept(kept, "skipped (outside tgbridge's folders)") && !hasKept(kept, "custom folder: remove it yourself: rm -rf ") && !hasKept(kept, "custom config: remove it yourself") {
 				t.Fatalf("kept %v", kept)
 			}
 			apply(t, do)
@@ -277,5 +280,106 @@ func TestUninstallTwice(t *testing.T) {
 				t.Fatalf("second plan %v", paths(do))
 			}
 		})
+	}
+}
+
+// A config file at a custom path is never deleted, even when its path names tgbridge.
+func TestPurgeCustomConfigKept(t *testing.T) {
+	e, cfg, _ := uninstallRig(t, "linux")
+	e.ConfigPath = filepath.Join(e.Home, "projects/tgbridge/config.yaml") // TGBRIDGE_CONFIG=~/projects/tgbridge/config.yaml
+	must(t, write(e.ConfigPath, "owner_id: 1"))
+	do, kept := UninstallPlan(e, cfg, true)
+	if !hasKept(kept, e.ConfigPath+": custom config: remove it yourself: rm "+e.ConfigPath) {
+		t.Fatalf("kept %v", kept)
+	}
+	apply(t, do)
+	if !exists(e.ConfigPath) {
+		t.Fatal("custom config deleted")
+	}
+}
+
+// tree maps every path under root to its mode and content (a symlink's target).
+func tree(t *testing.T, root string) map[string]string {
+	m := map[string]string{}
+	must(t, filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		fi, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+		v := fi.Mode().String()
+		switch {
+		case fi.Mode()&os.ModeSymlink != 0:
+			l, _ := os.Readlink(p)
+			v += " -> " + l
+		case fi.Mode().IsRegular():
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			v += " " + string(b)
+		}
+		m[p] = v
+		return nil
+	}))
+	return m
+}
+
+// End to end, as tgbridge uninstall runs it: Claude settings with the user's own hooks and tgbridge's.
+func TestRunUninstall(t *testing.T) {
+	e, cfg, calls := uninstallRig(t, "linux")
+	foreign := `{"model":"opus","permissions":{"allow":["Bash(ls)"]},"hooks":{` +
+		`"Stop":[{"matcher":"*","hooks":[{"type":"command","command":"/usr/bin/notify done"}]}],` +
+		`"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/usr/bin/guard"}]}]}}`
+	must(t, write(e.ClaudeSettings, foreign))
+	must(t, install.Install(e.ClaudeSettings, e.Bin, func(...string) error { return nil }))
+	if !strings.Contains(read(t, e.ClaudeSettings), e.Bin+" hook Stop") {
+		t.Fatal("rig: tgbridge hooks not installed")
+	}
+	must(t, write(filepath.Join(e.Home, "notes.txt"), "mine"))
+	*calls = nil
+	ctx := context.Background()
+
+	before := tree(t, e.Home)
+	var out strings.Builder
+	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true, DryRun: true}, strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(tree(t, e.Home), before) || len(*calls) != 0 || !strings.Contains(out.String(), "dry run: nothing changed") {
+		t.Fatalf("--dry-run changed something or ran %v:\n%s", *calls, out.String())
+	}
+
+	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true}, strings.NewReader("\n"), io.Discard); err == nil || !reflect.DeepEqual(tree(t, e.Home), before) {
+		t.Fatalf("an empty answer must abort and change nothing: %v", err)
+	}
+
+	out.Reset()
+	if err := RunUninstall(ctx, e, cfg, UninstallOpts{Purge: true, Yes: true}, strings.NewReader(""), &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	var got struct {
+		Model       string
+		Permissions map[string]any
+		Hooks       map[string][]any
+	}
+	settings := read(t, e.ClaudeSettings)
+	must(t, json.Unmarshal([]byte(settings), &got))
+	if strings.Contains(settings, "tgbridge") || got.Model != "opus" || got.Permissions["allow"] == nil ||
+		len(got.Hooks) != 2 || len(got.Hooks["Stop"]) != 1 || len(got.Hooks["PreToolUse"]) != 1 ||
+		!strings.Contains(settings, "/usr/bin/notify done") || !strings.Contains(settings, "/usr/bin/guard") {
+		t.Fatalf("only tgbridge's entries may go:\n%s", settings)
+	}
+	for _, p := range []string{".config/tgbridge", ".local/state/tgbridge", ".cache/tgbridge", ".local/bin/tgbridge", ".config/systemd/user/tgbridge.service"} {
+		if exists(filepath.Join(e.Home, p)) {
+			t.Errorf("%s left", p)
+		}
+	}
+	if read(t, filepath.Join(e.Home, "notes.txt")) != "mine" || !exists(e.ClaudeSettings+".tgbridge.bak") {
+		t.Fatal("removed a file that isn't tgbridge's")
+	}
+	if c := strings.Join(*calls, "\n"); !strings.Contains(c, "systemctl --user disable --now tgbridge") || !strings.Contains(c, "claude mcp remove --scope user tgbridge") {
+		t.Fatalf("calls %v", *calls)
 	}
 }
