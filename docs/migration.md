@@ -26,14 +26,14 @@ Stop the service, then archive the config and state:
 ```bash
 systemctl --user stop tgbridge                                                  # Linux
 # macOS: launchctl bootout gui/$(id -u)/io.github.romcodedao.tgbridge
-(umask 077 && tar czf ~/tgbridge-backup.tgz -C ~ .config/tgbridge .local/state/tgbridge)
+(umask 077 && tar czf ~/tgbridge-backup-$(date +%Y%m%d-%H%M).tgz -C ~ .config/tgbridge .local/state/tgbridge)
 ```
 
-Expected: no output, and `~/tgbridge-backup.tgz` exists. (In a source checkout, `make stop && make backup` does the same.)
+Expected: no output, and `~/tgbridge-backup-<date>.tgz` exists. (In a source checkout, `make stop && make backup` does the same.)
 
 Optional, to keep conversations resumable: `tar czf ~/claude-projects.tgz -C ~ .claude/projects`.
 
-Copy the archive(s) to the new machine, for example: `scp ~/tgbridge-backup.tgz newhost:~/`.
+Copy the archive(s) to the new machine, for example: `scp ~/tgbridge-backup-*.tgz newhost:~/`.
 
 ### 2. On the new machine: prerequisites
 
@@ -46,7 +46,7 @@ Copy the archive(s) to the new machine, for example: `scp ~/tgbridge-backup.tgz 
 ### 3. On the new machine: install
 
 ```bash
-cd ~ && tar xzf ~/tgbridge-backup.tgz           # restores ~/.config/tgbridge and ~/.local/state/tgbridge
+cd ~ && tar xzf ~/tgbridge-backup-*.tgz           # restores ~/.config/tgbridge and ~/.local/state/tgbridge
 # optional: cd ~ && tar xzf ~/claude-projects.tgz
 curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/romcodedao/tgbridge/main/install.sh | sh
 tgbridge doctor

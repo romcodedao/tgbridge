@@ -113,7 +113,7 @@ main() {
     "$dir/tgbridge" init </dev/tty
   else
     echo "No terminal available. Finish setup in a terminal with:"
-    echo "  run: $bin init"
+    echo "  run: \"$bin\" init"
   fi
 }
 

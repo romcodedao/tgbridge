@@ -113,7 +113,7 @@ func TestInstallScriptNoTTY(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install failed: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "run: "+filepath.Join(dir, "tgbridge")+" init") {
+	if !strings.Contains(out, `run: "`+filepath.Join(dir, "tgbridge")+`" init`) {
 		t.Fatalf("output lacks the init hint:\n%s", out)
 	}
 }
