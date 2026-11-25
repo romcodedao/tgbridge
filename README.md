@@ -81,6 +81,8 @@ go install github.com/romcodedao/tgbridge/cmd/tgbridge@latest
 tgbridge init
 ```
 
+To verify a downloaded release archive: `gh attestation verify <file> -R romcodedao/tgbridge` (details in [docs/install.md](docs/install.md#release-tarball-by-hand)).
+
 Manual steps, installer options, macOS notes and WSL2: [docs/install.md](docs/install.md).
 
 ## Uninstall

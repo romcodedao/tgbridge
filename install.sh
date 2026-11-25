@@ -96,10 +96,12 @@ main() {
   install -m 755 "$tmp/tgbridge" "$dir/tgbridge"
   echo "Installed $dir/tgbridge"
 
+  bin=tgbridge
   case ":$PATH:" in
     *":$dir:"*) ;;
     *)
-      echo "$dir is not on your PATH. Add it with:"
+      bin="$dir/tgbridge"
+      echo "$dir is not on your PATH. Add it with (and to your shell profile):"
       echo "  export PATH=\"$dir:\$PATH\""
       ;;
   esac
@@ -111,7 +113,7 @@ main() {
     "$dir/tgbridge" init </dev/tty
   else
     echo "No terminal available. Finish setup in a terminal with:"
-    echo "  run: tgbridge init"
+    echo "  run: \"$bin\" init"
   fi
 }
 

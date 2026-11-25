@@ -37,7 +37,7 @@ If that job fails, the release stays a draft:
 - **Transient failure** (network, GitHub outage): re-run the failed job (Actions → Release → Re-run failed jobs). A re-run builds the same tag with that tag's workflow, so it can't pick up fixes.
 - **Code or workflow failure**: land the fix on `main` as a `fix:` commit; its release PR releases the next version. Once that next version is published, delete the stale draft and its tag: `gh release delete vX.Y.Z --cleanup-tag`.
 
-The release PR is opened with `GITHUB_TOKEN`, so CI does not run on it. Try the build locally with `goreleaser release --snapshot --clean`.
+The release PR is opened with `GITHUB_TOKEN`, so its CI run waits as `action_required`: a maintainer approves it in the PR's checks (or an admin bypasses the ruleset) before merging. The PR title check never runs on release-please PRs, so it is not a required check. To run release-please again by hand: Actions → Release → Run workflow. Try the build locally with `goreleaser release --snapshot --clean`.
 
 `install.sh` has a test in `install_test.go` (`go test .`): it runs the script against a local fake release, including a bad checksum and no terminal. CI also runs `shellcheck install.sh`.
 
