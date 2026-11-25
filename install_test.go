@@ -108,11 +108,12 @@ func TestInstallScriptNoTTY(t *testing.T) {
 		t.Skip("no setsid")
 	}
 	// setsid drops the controlling terminal, so /dev/tty can't be opened
-	_, out, err := runInstall(t, "install.sh", fakeRelease(t, ""), "setsid")
+	// the install dir is not on PATH here, so the hint must give the full path
+	dir, out, err := runInstall(t, "install.sh", fakeRelease(t, ""), "setsid")
 	if err != nil {
 		t.Fatalf("install failed: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "run: tgbridge init") {
+	if !strings.Contains(out, "run: "+filepath.Join(dir, "tgbridge")+" init") {
 		t.Fatalf("output lacks the init hint:\n%s", out)
 	}
 }
