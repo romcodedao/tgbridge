@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/romcodedao/tgbridge/compare/v0.1.0...v0.1.1) (2026-11-26)
+
+
+### Documentation
+
+* fix README badges ([#14](https://github.com/romcodedao/tgbridge/issues/14)) ([0fc809b](https://github.com/romcodedao/tgbridge/commit/0fc809bc3ae07bac524482be92365e8a943caf3b))
+
 ## 0.1.0 (2026-11-25)
 
 First public release.
