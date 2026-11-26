@@ -3,7 +3,8 @@
 [![CI](https://github.com/romcodedao/tgbridge/actions/workflows/ci.yml/badge.svg)](https://github.com/romcodedao/tgbridge/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/romcodedao/tgbridge)](https://github.com/romcodedao/tgbridge/releases)
 [![License](https://img.shields.io/github/license/romcodedao/tgbridge)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/romcodedao/tgbridge)](https://goreportcard.com/report/github.com/romcodedao/tgbridge)
+[![Go Reference](https://pkg.go.dev/badge/github.com/romcodedao/tgbridge.svg)](https://pkg.go.dev/github.com/romcodedao/tgbridge)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/romcodedao/tgbridge)](go.mod)
 
 Drive real Claude Code sessions from a private Telegram chat: one topic per session, live streaming with thinking, and permission prompts as buttons.
 
